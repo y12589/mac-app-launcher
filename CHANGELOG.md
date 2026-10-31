@@ -1,5 +1,12 @@
 # 更新日志
 
+## [1.24.0] - 2026-10-31
+
+### 生态开放阶段
+- 开发者 API v2：新增 search / getApp / scenes / isRunning 查询接口，apps() 字段扩展（id、路径、启动统计）
+- 启动事件订阅：on("app-launched" / "scene-launched") 返回退订函数，第三方插件可监听联动，监听器异常不影响主流程
+- launchScene 支持按场景 id 启动；新增 DEV-API.md 开发者文档（QuickAdd / Templater / DataviewJS 示例）
+
 ## [1.23.0] - 2026-10-31
 
 ### 安全与兼容（稳定性阶段收尾）

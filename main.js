@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.0", changes: ["开发者 API v2：search / getApp / scenes / isRunning 查询接口", "启动事件订阅：on(\"app-launched\" / \"scene-launched\")，第三方插件可联动", "新增 DEV-API.md 开发者文档"] },
   { version: "1.23.0", changes: ["非 macOS 平台明确提示并自动停用，不再静默失效", "下载镜像强制 https:// 协议白名单，非法镜像自动回退直连并提示"] },
   { version: "1.22.0", changes: ["性能包：应用网格分批渲染，几百个应用也不卡", "图标懒加载：滚动进视口才读取图标，管理页同样生效", "扫描与场景执行写入调试日志，方便观察耗时"] },
   { version: "1.21.0", changes: ["配置版本化：旧配置自动备份后迁移，升级可回滚", "调试日志（可开关、可清除），一键清除使用统计与图标缓存"] },
@@ -2869,22 +2870,81 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     return target;
   }
 
+  // ---- 公开 API 事件总线：第三方插件可订阅启动事件，监听器异常不影响主流程 ----
+  emitPublicEvent(name, payload) {
+    const subs = this.publicEventSubs && this.publicEventSubs.get(name);
+    if (!subs) return;
+    for (const cb of [...subs]) {
+      try { cb(payload); } catch (e) { console.warn("[Mac App Launcher] API event listener failed", e); }
+    }
+  }
+
+  // 应用/场景的对外字段（不含内部状态，供第三方安全使用）
+  toPublicApp(a) {
+    return {
+      id: a.id, name: a.name, path: a.path,
+      category: a.category || "未分类",
+      pinned: !!a.pinned, custom: !!a.custom,
+      launchCount: a.launchCount || 0,
+      lastLaunchedAt: a.lastLaunchedAt || null
+    };
+  }
+
   registerPublicApi() {
+    if (!this.publicEventSubs) this.publicEventSubs = new Map();
     window.MacAppLauncher = {
-      // 启动应用（精确名 → 子串 → 模糊），返回 Promise<{ok}>
+      apiVersion: 2,
+      version: this.manifest.version,
+      // 事件订阅："app-launched" / "scene-launched"，返回退订函数
+      on: (event, cb) => {
+        if (typeof cb !== "function") return () => {};
+        if (!this.publicEventSubs.has(event)) this.publicEventSubs.set(event, new Set());
+        this.publicEventSubs.get(event).add(cb);
+        return () => { const s = this.publicEventSubs.get(event); if (s) s.delete(cb); };
+      },
+      off: (event, cb) => {
+        const s = this.publicEventSubs.get(event);
+        if (s) s.delete(cb);
+      },
+      // 启动应用（精确名/id → 子串 → 模糊），返回 Promise<{ok}>
       launch: name => {
         const app = this.findAppByQuery(name);
         if (!app) return Promise.resolve({ ok: false, error: `找不到应用：${name}` });
         return this.launchApp(app, { silent: true });
       },
-      // 启动场景
+      // 启动场景（名称或 id）
       launchScene: name => {
-        const scene = (this.settings.scenes || []).find(s => s.name === String(name || ""));
+        const key = String(name || "");
+        const scene = (this.settings.scenes || []).find(s => s.id === key) || (this.settings.scenes || []).find(s => s.name === key);
         if (!scene) return Promise.resolve({ ok: false, error: `找不到场景：${name}` });
         return this.launchScene(scene).then(() => ({ ok: true }));
       },
-      // 列出已勾选应用
-      apps: () => this.settings.apps.filter(a => a.selected).map(a => ({ name: a.name, category: a.category }))
+      // 查询：已勾选应用列表
+      apps: () => this.settings.apps.filter(a => a.selected).map(a => this.toPublicApp(a)),
+      // 查询：场景列表（含步骤摘要）
+      scenes: () => (this.settings.scenes || []).map(s => ({
+        id: s.id, name: s.name,
+        stepCount: ensureSceneSteps(s).length,
+        summary: sceneStepsSummary(this, s)
+      })),
+      // 查询：模糊搜索已勾选应用，返回前 10 条（含得分）
+      search: query => fuzzySearchApps(this.settings.apps.filter(a => a.selected), String(query || ""))
+        .slice(0, 10)
+        .map(item => ({ ...this.toPublicApp(item.app), score: Math.round(item.score * 100) / 100 })),
+      // 查询：单个应用详情，找不到返回 null
+      getApp: name => {
+        const app = this.findAppByQuery(name);
+        return app ? this.toPublicApp(app) : null;
+      },
+      // 查询：应用是否正在运行
+      isRunning: async name => {
+        const app = this.findAppByQuery(name);
+        if (!app) return { ok: false, error: `找不到应用：${name}` };
+        const bundleId = await this.resolveBundleId(app);
+        if (!bundleId) return { ok: true, running: false, app: app.name };
+        const running = await this.getRunningBundleIds();
+        return { ok: true, running: running.has(bundleId.toLowerCase()), app: app.name, bundleId };
+      }
     };
   }
 
@@ -3695,6 +3755,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           app.lastLaunchedAt = Date.now();
           this.saveSettings();
           this.logLaunchToDaily(app).catch(err => console.warn("[Mac App Launcher] 写入每日笔记失败", err));
+          this.emitPublicEvent("app-launched", { id: app.id, name: app.name, category: app.category || "未分类" });
           if (!silent) new Notice(`已请求启动：${app.name}`);
           resolve({ ok: true });
         }
@@ -4240,6 +4301,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     let message = parts.length ? `场景「${scene.name}」：${parts.join("，")}` : `场景「${scene.name}」没有可执行的步骤`;
     if (failed.length) message += `；未完成：${failed.join("、")}`;
     this.debugLog(`场景「${scene.name}」执行结束：${parts.join("，") || "无可执行步骤"}${failed.length ? `；未完成 ${failed.length} 项` : ""}`);
+    this.emitPublicEvent("scene-launched", { id: scene.id, name: scene.name, launched, opened, commands, skippedRunning, failed: failed.length });
     new Notice(message, 7000);
   }
 
