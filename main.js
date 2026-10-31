@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.19.0", changes: ["画布自动执行支持命令与文件夹节点：场景导出的画布可以整条工作流一键执行"] },
   { version: "1.18.0", changes: ["场景升级为混合工作流：应用、笔记、文件夹、Obsidian 命令四种步骤有序执行", "命令白名单：只能执行亲手挑进场景的已注册命令，失效自动跳过并提示"] },
   { version: "1.17.1", changes: ["文档补齐：README 与 Agent 接入说明覆盖 1.8–1.17 全部新功能"] },
   { version: "1.17.0", changes: ["Canvas 工作流自动执行：按连线顺序启动应用、打开笔记，循环连线自动拦截"] },
@@ -2420,12 +2421,15 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       new Notice("检测到循环连线，已取消执行。请检查画布中的连线。", 6000);
       return;
     }
-    // 依次执行：app-launcher 节点启动应用，file 节点打开笔记，装饰性节点静默忽略
+    // 依次执行：app-launcher 节点启动应用、file 节点打开笔记、
+    // mal-step 节点执行命令/打开文件夹（场景导出的结构化步骤），装饰性节点静默忽略
     const running = await this.getRunningBundleIds();
     let launched = 0;
     let opened = 0;
+    let commands = 0;
     let alreadyRunning = 0;
     const failed = [];
+    const vaultBase = (this.app.vault.adapter && this.app.vault.adapter.getBasePath) ? this.app.vault.adapter.getBasePath() : "";
     for (const id of order) {
       const node = nodeById.get(id);
       if (node.type === "file" && node.file) {
@@ -2439,6 +2443,38 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         continue;
       }
       if (node.type !== "text") continue;
+      // 场景导出的结构化步骤节点：command / folder
+      const stepBlock = /```mal-step\s*\n([\s\S]*?)```/.exec(node.text || "");
+      if (stepBlock) {
+        const type = (/^type:\s*(.+)$/m.exec(stepBlock[1]) || [])[1];
+        if (type === "command") {
+          const cmdId = (/^id:\s*(.+)$/m.exec(stepBlock[1]) || [])[1];
+          const cmdName = ((/^name:\s*(.+)$/m.exec(stepBlock[1]) || [])[1]) || cmdId || "未知命令";
+          if (cmdId && this.app.commands.commands && this.app.commands.commands[cmdId.trim()]) {
+            try {
+              await this.app.commands.executeCommandById(cmdId.trim());
+              commands++;
+            } catch (error) {
+              failed.push(`命令执行失败：${cmdName}`);
+            }
+          } else {
+            failed.push(`命令不存在：${cmdName}`);
+          }
+        } else if (type === "folder") {
+          const folderPath = ((/^path:\s*(.+)$/m.exec(stepBlock[1]) || [])[1] || "").trim();
+          if (folderPath && this.app.vault.getAbstractFileByPath(folderPath)) {
+            try {
+              await execFileAsync("open", [path.join(vaultBase, folderPath)]);
+              opened++;
+            } catch (error) {
+              failed.push(`文件夹打开失败：${folderPath}`);
+            }
+          } else {
+            failed.push(`文件夹不存在：${folderPath || "未指定"}`);
+          }
+        }
+        continue;
+      }
       const block = /```app-launcher\s*\n([\s\S]*?)```/.exec(node.text || "");
       if (!block) continue;
       const names = [...block[1].matchAll(/^app:\s*(.+)$/gm)].map(x => x[1].trim());
@@ -2453,7 +2489,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       }
     }
     const parts = [`启动 ${launched} 个应用`];
-    if (opened) parts.push(`打开 ${opened} 篇笔记`);
+    if (opened) parts.push(`打开 ${opened} 个笔记/文件夹`);
+    if (commands) parts.push(`执行 ${commands} 个命令`);
     if (alreadyRunning) parts.push(`${alreadyRunning} 个已在运行`);
     new Notice(`画布工作流执行完成：${parts.join("，")}`, 6000);
     if (failed.length) new Notice(`未能处理：${failed.join("、")}`, 8000);
@@ -3891,14 +3928,14 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         nodes.push({
           id: nodeId,
           type: "text",
-          text: `📁 **打开文件夹**\n${step.path}\n（启动场景时在 Finder 打开）`,
+          text: `📁 **打开文件夹**\n${step.path}\n\`\`\`mal-step\ntype: folder\npath: ${step.path}\n\`\`\``,
           x: nodeIds.length * 300, y: 0, width: 250, height: 190
         });
       } else if (step.type === "command") {
         nodes.push({
           id: nodeId,
           type: "text",
-          text: `⌘ **执行命令**\n${step.name || step.id}\n（启动场景时自动执行）`,
+          text: `⌘ **执行命令**\n${step.name || step.id}\n\`\`\`mal-step\ntype: command\nid: ${step.id}\nname: ${step.name || step.id}\n\`\`\``,
           x: nodeIds.length * 300, y: 0, width: 250, height: 190
         });
       } else {
