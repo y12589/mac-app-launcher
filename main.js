@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.17.0", changes: ["Canvas 工作流自动执行：按连线顺序启动应用、打开笔记，循环连线自动拦截"] },
   { version: "1.16.0", changes: ["场景启动感知运行状态：已在运行的应用自动跳过，不重复拉起"] },
   { version: "1.15.0", changes: ["场景一键导出 Canvas 工作流：应用节点可点击启动，连线串联执行顺序"] },
   { version: "1.14.0", changes: ["一键生成 Bases 数据库视图，应用资料卡接入 Obsidian 原生数据库"] },
@@ -1716,6 +1717,17 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("允许自动执行画布工作流")
+      .setDesc("开启后可用命令「执行当前画布的工作流」按连线顺序启动应用、打开笔记。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.canvasExecuteEnabled !== false);
+        toggle.onChange(async value => {
+          this.plugin.settings.canvasExecuteEnabled = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
     // ── Agent API ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "Agent API" });
 
@@ -1932,7 +1944,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : "",
       downloadMirror: typeof loaded.downloadMirror === "string" ? loaded.downloadMirror : "",
       autoLaunchSceneId: typeof loaded.autoLaunchSceneId === "string" ? loaded.autoLaunchSceneId : "",
-      logToDailyNote: loaded.logToDailyNote === true
+      logToDailyNote: loaded.logToDailyNote === true,
+      canvasExecuteEnabled: loaded.canvasExecuteEnabled !== false
     };
     this.scanning = false;
     this.scanCancelled = false;
@@ -2019,6 +2032,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       id: "create-bases-view",
       name: "生成应用 Bases 数据库视图",
       callback: () => this.createBasesFile()
+    });
+    this.addCommand({
+      id: "execute-active-canvas",
+      name: "执行当前画布的工作流",
+      callback: () => this.executeActiveCanvas()
     });
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
@@ -2133,6 +2151,91 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.refreshSceneCommands();
     this.refreshViews();
     return { ok: true, apps: this.settings.apps.length, scenes: this.settings.scenes.length };
+  }
+
+  // ---- Canvas 工作流自动执行：按连线顺序执行当前画布 ----
+  async executeActiveCanvas() {
+    if (this.settings.canvasExecuteEnabled === false) {
+      new Notice("画布自动执行已在设置中关闭");
+      return;
+    }
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== "canvas") {
+      new Notice("请先打开一个 .canvas 画布");
+      return;
+    }
+    let canvas;
+    try {
+      canvas = JSON.parse(await this.app.vault.read(file));
+    } catch (e) {
+      new Notice("画布文件解析失败");
+      return;
+    }
+    const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
+    const edges = Array.isArray(canvas.edges) ? canvas.edges : [];
+    // 有向图 + Kahn 拓扑排序；多个起点按 x 坐标从左到右
+    const nodeById = new Map(nodes.map(n => [n.id, n]));
+    const indeg = new Map(nodes.map(n => [n.id, 0]));
+    const adj = new Map();
+    for (const e of edges) {
+      if (!nodeById.has(e.fromNode) || !nodeById.has(e.toNode)) continue;
+      if (!adj.has(e.fromNode)) adj.set(e.fromNode, []);
+      adj.get(e.fromNode).push(e.toNode);
+      indeg.set(e.toNode, indeg.get(e.toNode) + 1);
+    }
+    const queue = nodes.filter(n => indeg.get(n.id) === 0)
+      .sort((a, b) => (a.x || 0) - (b.x || 0))
+      .map(n => n.id);
+    const order = [];
+    while (queue.length) {
+      const id = queue.shift();
+      order.push(id);
+      for (const next of adj.get(id) || []) {
+        indeg.set(next, indeg.get(next) - 1);
+        if (indeg.get(next) === 0) queue.push(next);
+      }
+    }
+    if (order.length < nodes.length) {
+      new Notice("检测到循环连线，已取消执行。请检查画布中的连线。", 6000);
+      return;
+    }
+    // 依次执行：app-launcher 节点启动应用，file 节点打开笔记，装饰性节点静默忽略
+    const running = await this.getRunningBundleIds();
+    let launched = 0;
+    let opened = 0;
+    let alreadyRunning = 0;
+    const failed = [];
+    for (const id of order) {
+      const node = nodeById.get(id);
+      if (node.type === "file" && node.file) {
+        const target = this.app.vault.getAbstractFileByPath(node.file);
+        if (target && target instanceof TFile) {
+          await this.app.workspace.getLeaf(false).openFile(target);
+          opened++;
+        } else {
+          failed.push(node.file);
+        }
+        continue;
+      }
+      if (node.type !== "text") continue;
+      const block = /```app-launcher\s*\n([\s\S]*?)```/.exec(node.text || "");
+      if (!block) continue;
+      const names = [...block[1].matchAll(/^app:\s*(.+)$/gm)].map(x => x[1].trim());
+      for (const name of names) {
+        const app = this.findAppByQuery(name);
+        if (!app) { failed.push(name); continue; }
+        const bundleId = await this.resolveBundleId(app);
+        if (bundleId && running.has(bundleId.toLowerCase())) { alreadyRunning++; continue; }
+        await this.launchApp(app, { silent: true });
+        launched++;
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+    const parts = [`启动 ${launched} 个应用`];
+    if (opened) parts.push(`打开 ${opened} 篇笔记`);
+    if (alreadyRunning) parts.push(`${alreadyRunning} 个已在运行`);
+    new Notice(`画布工作流执行完成：${parts.join("，")}`, 6000);
+    if (failed.length) new Notice(`未能处理：${failed.join("、")}`, 8000);
   }
 
   // ---- Bases 数据库视图：应用资料卡接入 Obsidian 原生数据库 ----
