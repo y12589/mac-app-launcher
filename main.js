@@ -1,5 +1,5 @@
 const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu } = require("obsidian");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -8,10 +8,25 @@ const http = require("http");
 const https = require("https");
 
 const VIEW_TYPE = "mac-app-launcher-view";
-const DEFAULT_CATEGORIES = [
-  "AI助手", "AI智能体", "办公工具", "开发工具", "设计工具",
-  "浏览器", "影音工具", "系统工具", "其他", "未分类"
+const DEFAULT_CATEGORY_META = [
+  { name: "AI助手", icon: "🤖" }, { name: "AI智能体", icon: "🦾" },
+  { name: "办公工具", icon: "📝" }, { name: "开发工具", icon: "🛠" },
+  { name: "设计工具", icon: "🎨" }, { name: "浏览器", icon: "🌐" },
+  { name: "影音工具", icon: "🎬" }, { name: "系统工具", icon: "⚙️" },
+  { name: "其他", icon: "📦" }, { name: "未分类", icon: "❓" }
 ];
+const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_META.map(c => c.name);
+
+// 归类学习：用户手动改过的分类按应用名记住，扫描时优先命中
+function learnedCategory(name, rules) {
+  if (!rules || !name) return "";
+  const lower = String(name).toLowerCase();
+  if (rules[lower]) return rules[lower];
+  for (const [key, category] of Object.entries(rules)) {
+    if (key.length >= 2 && lower.includes(key)) return category;
+  }
+  return "";
+}
 
 function execFileAsync(file, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -134,12 +149,30 @@ function fuzzySearchApps(apps, query) {
     const catScore = fuzzyScore(q, app.category || "") * 1.2;
     const descScore = fuzzyScore(q, app.description || "") * 0.8;
     const usageScore = fuzzyScore(q, app.usage || "") * 0.6;
-    const score = nameScore + catScore + descScore + usageScore;
+    // 拼音维度：首字母（wx→微信）权重高于全拼
+    const pinyinScore = Math.max(
+      fuzzyScore(q, app.pinyinAbbr || "") * 2.4,
+      fuzzyScore(q, app.pinyinFull || "") * 1.6
+    );
+    const score = nameScore + catScore + descScore + usageScore + pinyinScore;
     if (score > 0.2) results.push({ app, score });
   }
   results.sort((a, b) => b.score - a.score);
   return results;
 }
+
+// 拼音转换助手脚本（Swift CFStringTransform），首次使用时编译为插件目录下的 pinyin-helper
+const PINYIN_SWIFT_SOURCE = `import Foundation
+let input = try JSONDecoder().decode([String].self, from: FileHandle.standardInput.readDataToEndOfFile())
+var out: [String] = []
+for n in input {
+  let m = NSMutableString(string: n)
+  CFStringTransform(m, nil, kCFStringTransformToLatin, false)
+  CFStringTransform(m, nil, kCFStringTransformStripDiacritics, false)
+  out.append(m as String)
+}
+print(String(data: try JSONEncoder().encode(out), encoding: .utf8)!)
+`;
 
 function isNestedInsideAnotherApp(appPath) {
   const parts = path.resolve(appPath).split(path.sep).filter(Boolean);
@@ -477,10 +510,20 @@ class MacAppLauncherView extends ItemView {
         body.createEl("p", { text: "这个分类下暂时没有应用。", cls: "mal-empty" });
       }
     } else {
+      // 最近启动条：无搜索词时显示最近用过的 8 个
+      if (!term) {
+        const recent = selected
+          .filter(app => app.lastLaunchedAt)
+          .sort((a, b) => (b.lastLaunchedAt || 0) - (a.lastLaunchedAt || 0))
+          .slice(0, 8);
+        if (recent.length) this.renderAppSection(body, "最近启动", recent, "🕘", true);
+      }
       const pinned = filteredSearch.filter(app => app.pinned);
       if (pinned.length) this.renderAppSection(body, "常用应用", pinned);
 
-      const categories = [...new Set(filteredSearch.filter(app => !app.pinned).map(app => app.category || "未分类"))];
+      const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
+      const categories = [...new Set(filteredSearch.filter(app => !app.pinned).map(app => app.category || "未分类"))]
+        .sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999) || a.localeCompare(b, "zh-Hans-CN"));
       for (const category of categories) {
         const items = filteredSearch.filter(app => !app.pinned && (app.category || "未分类") === category);
         if (items.length) this.renderAppSection(body, category, items);
@@ -492,12 +535,14 @@ class MacAppLauncherView extends ItemView {
 
   renderCategoryNav(body, selected, term) {
     const nav = body.createDiv({ cls: "mal-category-nav" });
-    const categories = [...new Set(selected.map(app => app.category || "未分类"))].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
+    const categories = [...new Set(selected.map(app => app.category || "未分类"))]
+      .sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999) || a.localeCompare(b, "zh-Hans-CN"));
     const buttons = [
       { id: "__all__", label: `全部 ${selected.length}` },
       ...categories.map(category => ({
         id: category,
-        label: `${category} ${selected.filter(app => app.category === category).length}`
+        label: `${this.plugin.categoryIcon(category) ? this.plugin.categoryIcon(category) + " " : ""}${category} ${selected.filter(app => (app.category || "未分类") === category).length}`
       }))
     ];
 
@@ -526,6 +571,7 @@ class MacAppLauncherView extends ItemView {
         const app = this.plugin.settings.apps.find(entry => entry.id === sourceId);
         if (!app) return;
         app.category = item.id;
+        this.plugin.learnCategory(app);
         await this.plugin.saveSettings();
         this.render();
         new Notice(`已将 ${app.name} 移入「${item.id}」`);
@@ -533,12 +579,15 @@ class MacAppLauncherView extends ItemView {
     }
   }
 
-  renderAppSection(body, title, apps) {
+  renderAppSection(body, title, apps, iconOverride, keepOrder) {
     const isPinnedStrip = apps.length > 0 && apps.every(app => app.pinned);
     const section = body.createDiv({ cls: isPinnedStrip ? "mal-pinned-top" : "mal-section" });
-    if (title) section.createEl("h3", { text: title, cls: "mal-category" });
+    if (title) {
+      const icon = iconOverride || this.plugin.categoryIcon(title);
+      section.createEl("h3", { text: `${icon ? icon + " " : ""}${title}`, cls: "mal-category" });
+    }
     const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
-    const sorted = [...apps].sort((a, b) => {
+    const sorted = keepOrder ? [...apps] : [...apps].sort((a, b) => {
       const aKey = a.pinned ? (a.pinnedOrder ?? a.order ?? 0) : (a.order ?? 0);
       const bKey = b.pinned ? (b.pinnedOrder ?? b.order ?? 0) : (b.order ?? 0);
       return aKey - bKey || a.name.localeCompare(b.name, "zh-Hans-CN");
@@ -719,14 +768,28 @@ class MacAppLauncherView extends ItemView {
       });
       usage.value = app.usage || "";
 
+      panel.createEl("div", { text: "启动快捷键（可选，如 Mod+Shift+1，清空即取消）", cls: "mal-detail-label" });
+      const hotkeyInput = panel.createEl("input", {
+        cls: "mal-detail-hotkey",
+        attr: { type: "text", placeholder: "Mod+Shift+1", spellcheck: "false" }
+      });
+      hotkeyInput.value = app.hotkey || "";
+
       const editActions = panel.createDiv({ cls: "mal-detail-edit-actions" });
       const save = editActions.createEl("button", { text: "保存介绍", cls: "mal-primary" });
       save.addEventListener("click", async () => {
         app.description = description.value.trim();
         app.usage = usage.value.trim();
+        const hotkey = hotkeyInput.value.trim();
+        app.hotkey = hotkey;
+        if (hotkey && !this.plugin.parseHotkey(hotkey)) {
+          new Notice("快捷键格式无效，应为如 Mod+Shift+1 的组合", 6000);
+          return;
+        }
         await this.plugin.saveSettings();
+        this.plugin.refreshAppHotkeys();
         this.editingDetail = false;
-        new Notice(`已保存 ${app.name} 的介绍`);
+        new Notice(`已保存 ${app.name} 的介绍${hotkey ? `，快捷键 ${hotkey} 已生效` : ""}`);
         this.render();
       });
       const cancel = editActions.createEl("button", { text: "取消", cls: "mal-button" });
@@ -760,12 +823,46 @@ class MacAppLauncherView extends ItemView {
 
   renderManager(body, term) {
     this.renderProgress(body);
-    const apps = this.plugin.settings.apps.filter(app =>
+    let apps = this.plugin.settings.apps.filter(app =>
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
+    if (this.showUncategorizedOnly) {
+      apps = apps.filter(app => !app.category || app.category === "未分类");
+    }
 
     const summary = body.createDiv({ cls: "mal-manage-summary" });
     this.updateManageSummary(summary);
+
+    // 工具条：未分类速筛 + 分类管理开关
+    const toolbar = body.createDiv({ cls: "mal-manage-toolbar" });
+    const uncatLabel = toolbar.createEl("label", { cls: "mal-manage-uncat" });
+    const uncatCheck = uncatLabel.createEl("input", { attr: { type: "checkbox" } });
+    uncatCheck.checked = !!this.showUncategorizedOnly;
+    uncatCheck.addEventListener("change", () => {
+      this.showUncategorizedOnly = uncatCheck.checked;
+      this.render();
+    });
+    uncatLabel.createEl("span", { text: " 只看未分类" });
+    const catMgrBtn = toolbar.createEl("button", {
+      text: this.showCategoryManager ? "收起分类管理" : "分类管理",
+      cls: "mal-button"
+    });
+    catMgrBtn.addEventListener("click", () => {
+      this.showCategoryManager = !this.showCategoryManager;
+      this.render();
+    });
+    const sceneMgrBtn = toolbar.createEl("button", {
+      text: this.showSceneManager ? "收起场景模式" : "场景模式",
+      cls: "mal-button"
+    });
+    sceneMgrBtn.addEventListener("click", () => {
+      this.showSceneManager = !this.showSceneManager;
+      this.render();
+    });
+
+    if (this.showCategoryManager) this.renderCategoryManager(body);
+    if (this.showSceneManager) this.renderSceneManager(body);
+
     this.renderAddCustomApp(body);
     this.renderAgentApiPanel(body);
 
@@ -777,11 +874,54 @@ class MacAppLauncherView extends ItemView {
     const list = body.createDiv({ cls: "mal-manage-list" });
     const datalistId = `mal-categories-${this.plugin.manifest.id}`;
     const datalist = list.createEl("datalist", { attr: { id: datalistId } });
-    const categories = new Set([...DEFAULT_CATEGORIES, ...this.plugin.settings.apps.map(a => a.category).filter(Boolean)]);
+    const categories = new Set([...this.plugin.getCategories().map(c => c.name), ...this.plugin.settings.apps.map(a => a.category).filter(Boolean)]);
     for (const category of categories) datalist.createEl("option", { attr: { value: category } });
+
+    // 批量操作条
+    if (!this.batchSelected) this.batchSelected = new Set();
+    const batchBar = list.createDiv({ cls: "mal-batch-bar" });
+    const selectedCount = this.batchSelected.size;
+    if (selectedCount > 0) {
+      batchBar.createEl("span", { text: `已选 ${selectedCount} 个`, cls: "mal-batch-count" });
+      const batchInput = batchBar.createEl("input", {
+        attr: { type: "text", list: datalistId, placeholder: "设为分类…" },
+        cls: "mal-category-input"
+      });
+      const applyBtn = batchBar.createEl("button", { text: "应用", cls: "mal-primary" });
+      applyBtn.addEventListener("click", async () => {
+        const category = batchInput.value.trim();
+        if (!category) { new Notice("请输入目标分类"); return; }
+        let changed = 0;
+        for (const app of this.plugin.settings.apps) {
+          if (this.batchSelected.has(app.id)) {
+            app.category = category;
+            this.plugin.learnCategory(app);
+            changed++;
+          }
+        }
+        await this.plugin.saveSettings();
+        new Notice(`已将 ${changed} 个应用分类为：${category}`);
+        this.batchSelected.clear();
+        this.render();
+      });
+      const clearBtn = batchBar.createEl("button", { text: "清除选择", cls: "mal-button" });
+      clearBtn.addEventListener("click", () => {
+        this.batchSelected.clear();
+        this.render();
+      });
+    } else {
+      batchBar.createEl("span", { text: "勾选左侧复选框可批量设置分类", cls: "mal-batch-hint" });
+    }
 
     for (const app of apps) {
       const row = list.createDiv({ cls: "mal-manage-row" });
+      const batchCheck = row.createEl("input", { attr: { type: "checkbox" }, cls: "mal-check mal-batch-check" });
+      batchCheck.checked = this.batchSelected.has(app.id);
+      batchCheck.addEventListener("change", () => {
+        if (batchCheck.checked) this.batchSelected.add(app.id);
+        else this.batchSelected.delete(app.id);
+        this.render();
+      });
       const checkbox = row.createEl("input", { attr: { type: "checkbox" }, cls: "mal-check" });
       checkbox.checked = !!app.selected;
       checkbox.addEventListener("change", async () => {
@@ -806,6 +946,7 @@ class MacAppLauncherView extends ItemView {
       categoryInput.value = app.category || "未分类";
       categoryInput.addEventListener("change", async () => {
         app.category = categoryInput.value.trim() || "未分类";
+        this.plugin.learnCategory(app);
         await this.plugin.saveSettings();
         new Notice(`已将 ${app.name} 分类为：${app.category}`);
       });
@@ -817,6 +958,95 @@ class MacAppLauncherView extends ItemView {
         this.render();
       });
     }
+  }
+
+  // 分类管理面板：新增、重命名、排序、删除
+  renderCategoryManager(body) {
+    const panel = body.createDiv({ cls: "mal-cat-manager" });
+    panel.createEl("h3", { text: "分类管理" });
+    for (const cat of this.plugin.getCategories()) {
+      const row = panel.createDiv({ cls: "mal-cat-row" });
+      const iconInput = row.createEl("input", {
+        cls: "mal-cat-icon",
+        attr: { type: "text", maxlength: "4", title: "分类图标（emoji）" }
+      });
+      iconInput.value = cat.icon || "";
+      iconInput.addEventListener("change", async () => {
+        await this.plugin.renameCategory(cat.name, cat.name, iconInput.value);
+      });
+      const nameInput = row.createEl("input", { cls: "mal-cat-name", attr: { type: "text" } });
+      nameInput.value = cat.name;
+      nameInput.addEventListener("change", async () => {
+        const result = await this.plugin.renameCategory(cat.name, nameInput.value, cat.icon);
+        if (!result.ok) {
+          new Notice(result.error);
+          nameInput.value = cat.name;
+        } else if (nameInput.value.trim() !== cat.name) {
+          new Notice(`分类「${cat.name}」已重命名为「${nameInput.value.trim()}」`);
+        }
+      });
+      const count = this.plugin.settings.apps.filter(a => a.category === cat.name).length;
+      row.createEl("span", { text: `${count} 个应用`, cls: "mal-cat-count" });
+      const up = row.createEl("button", { text: "↑", cls: "mal-button mal-cat-move" });
+      up.addEventListener("click", () => this.plugin.moveCategory(cat.name, -1));
+      const down = row.createEl("button", { text: "↓", cls: "mal-button mal-cat-move" });
+      down.addEventListener("click", () => this.plugin.moveCategory(cat.name, 1));
+      if (cat.name !== "未分类") {
+        const del = row.createEl("button", { text: "删除", cls: "mal-button mal-button-danger" });
+        del.addEventListener("click", async () => {
+          const result = await this.plugin.removeCategory(cat.name);
+          new Notice(result.ok ? `已删除分类「${cat.name}」，应用归入未分类` : result.error);
+        });
+      }
+    }
+    const addRow = panel.createDiv({ cls: "mal-cat-row mal-cat-add" });
+    const newIcon = addRow.createEl("input", { cls: "mal-cat-icon", attr: { type: "text", maxlength: "4", placeholder: "🆕" } });
+    const newName = addRow.createEl("input", { cls: "mal-cat-name", attr: { type: "text", placeholder: "新分类名称" } });
+    const addBtn = addRow.createEl("button", { text: "添加分类", cls: "mal-primary" });
+    addBtn.addEventListener("click", async () => {
+      const result = await this.plugin.addCategory(newName.value, newIcon.value);
+      new Notice(result.ok ? `已添加分类：${newName.value.trim()}` : result.error);
+    });
+  }
+
+  // 场景模式面板：用批量勾选的应用创建场景，一键启动一组应用
+  renderSceneManager(body) {
+    const panel = body.createDiv({ cls: "mal-cat-manager" });
+    panel.createEl("h3", { text: "场景模式" });
+    panel.createEl("p", {
+      text: "场景可一键启动一组应用。先在下方列表勾选应用，再回到这里创建；快速启动面板（Cmd+Shift+Space）可搜到场景。",
+      cls: "mal-add-custom-hint"
+    });
+    for (const scene of this.plugin.settings.scenes) {
+      const row = panel.createDiv({ cls: "mal-cat-row" });
+      row.createEl("span", { text: "🎬", cls: "mal-scene-icon" });
+      row.createEl("span", { text: scene.name, cls: "mal-scene-name" });
+      row.createEl("span", { text: `${scene.appIds.length} 个应用`, cls: "mal-cat-count" });
+      const launch = row.createEl("button", { text: "启动", cls: "mal-primary" });
+      launch.addEventListener("click", () => this.plugin.launchScene(scene));
+      const del = row.createEl("button", { text: "删除", cls: "mal-button mal-button-danger" });
+      del.addEventListener("click", async () => {
+        await this.plugin.removeScene(scene.id);
+        new Notice(`已删除场景「${scene.name}」`);
+      });
+    }
+    if (!this.plugin.settings.scenes.length) {
+      panel.createEl("p", { text: "还没有场景。", cls: "mal-empty" });
+    }
+    const addRow = panel.createDiv({ cls: "mal-cat-row mal-cat-add" });
+    const nameInput = addRow.createEl("input", { cls: "mal-cat-name", attr: { type: "text", placeholder: "新场景名称，如：写作模式" } });
+    const createBtn = addRow.createEl("button", { text: "用勾选的应用创建", cls: "mal-primary" });
+    createBtn.addEventListener("click", async () => {
+      const ids = [...(this.batchSelected || [])];
+      const result = await this.plugin.addScene(nameInput.value, ids);
+      if (result.ok) {
+        new Notice(`已创建场景「${nameInput.value.trim()}」（${ids.length} 个应用）`);
+        this.batchSelected.clear();
+        this.render();
+      } else {
+        new Notice(result.error, 6000);
+      }
+    });
   }
 
   renderAddCustomApp(body) {
@@ -1021,8 +1251,25 @@ class QuickLaunchModal {
         a.app.name.localeCompare(b.app.name, "zh-Hans-CN")
       );
     }
-    // 最多显示 12 个，避免列表过长
-    this.results = searched.slice(0, 12).map(item => item.app);
+    // 场景条目：有关键词时参与模糊匹配，包装成伪应用
+    if (this.query.trim() && this.plugin.settings.scenes.length) {
+      const pseudoScenes = this.plugin.settings.scenes.map(s => ({
+        id: `scene-${s.id}`,
+        name: s.name,
+        category: `场景 · ${s.appIds.length} 个应用`,
+        isScene: true,
+        scene: s,
+        launchCount: 0,
+        description: "",
+        usage: ""
+      }));
+      const sceneHits = fuzzySearchApps(pseudoScenes, this.query);
+      const merged = [...searched, ...sceneHits].sort((a, b) => b.score - a.score);
+      this.results = merged.slice(0, 12).map(item => item.app);
+    } else {
+      // 最多显示 12 个，避免列表过长
+      this.results = searched.slice(0, 12).map(item => item.app);
+    }
     if (this.selectedIndex >= this.results.length) {
       this.selectedIndex = Math.max(0, this.results.length - 1);
     }
@@ -1048,6 +1295,10 @@ class QuickLaunchModal {
 
       const iconDiv = document.createElement("div");
       iconDiv.className = "mal-quick-launch-item-icon";
+      if (app.isScene) {
+        iconDiv.textContent = "🎬";
+        iconDiv.className += " mal-fallback-icon";
+      } else
       this.plugin.iconCache.get(app.id)
         ? (() => {
             const img = document.createElement("img");
@@ -1170,7 +1421,8 @@ class QuickLaunchModal {
   launchSelected() {
     const app = this.results[this.selectedIndex];
     if (!app) return;
-    this.plugin.launchApp(app);
+    if (app.isScene) this.plugin.launchScene(app.scene);
+    else this.plugin.launchApp(app);
     this.close();
   }
 }
@@ -1322,6 +1574,22 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       agentTokenHash: tokenHash,
       agentApiEnabled: loaded.agentApiEnabled !== false,
       viewMode: loaded.viewMode === "list" ? "list" : "grid",
+      categories: Array.isArray(loaded.categories) && loaded.categories.length
+        ? loaded.categories.filter(c => c && c.name).map((c, i) => ({
+            name: String(c.name),
+            icon: typeof c.icon === "string" ? c.icon : "📁",
+            order: Number.isFinite(Number(c.order)) ? Number(c.order) : i
+          }))
+        : DEFAULT_CATEGORY_META.map((c, i) => ({ ...c, order: i })),
+      categoryRules: loaded.categoryRules && typeof loaded.categoryRules === "object" && !Array.isArray(loaded.categoryRules)
+        ? loaded.categoryRules : {},
+      scenes: Array.isArray(loaded.scenes)
+        ? loaded.scenes.filter(s => s && s.name).map(s => ({
+            id: String(s.id || crypto.randomBytes(6).toString("hex")),
+            name: String(s.name),
+            appIds: Array.isArray(s.appIds) ? s.appIds : []
+          }))
+        : [],
       autoCheckUpdates: loaded.autoCheckUpdates !== false,
       lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
       latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : ""
@@ -1392,6 +1660,48 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         console.error("[Mac App Launcher] Auto update check failed", error);
       });
     }
+    // 后台补齐存量应用的拼音索引
+    this.buildPinyin(this.settings.apps);
+    // 注册单应用快捷键
+    this.refreshAppHotkeys();
+  }
+
+  // ---- 单应用快捷键 ----
+  refreshAppHotkeys() {
+    const commands = this.app.commands;
+    // 先注销旧命令
+    for (const id of Object.keys(commands.commands)) {
+      if (id.startsWith(`${this.manifest.id}:launch-hotkey-`)) {
+        commands.removeCommand(id);
+      }
+    }
+    for (const app of this.settings.apps) {
+      if (!app.hotkey || !app.selected) continue;
+      const commandId = `launch-hotkey-${app.id}`;
+      this.addCommand({
+        id: commandId,
+        name: `启动：${app.name}`,
+        hotkeys: [this.parseHotkey(app.hotkey)].filter(Boolean),
+        callback: () => this.launchApp(app)
+      });
+    }
+  }
+
+  // 解析 "Mod+Shift+1" 形式为 Obsidian hotkey 对象
+  parseHotkey(text) {
+    const parts = String(text || "").split("+").map(p => p.trim()).filter(Boolean);
+    if (!parts.length) return null;
+    const key = parts.pop();
+    if (!key) return null;
+    const modifiers = [];
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      if (lower === "mod" || lower === "cmd" || lower === "command" || lower === "⌘") modifiers.push("Mod");
+      else if (lower === "shift" || lower === "⇧") modifiers.push("Shift");
+      else if (lower === "alt" || lower === "option" || lower === "opt" || lower === "⌥") modifiers.push("Alt");
+      else if (lower === "ctrl" || lower === "control" || lower === "⌃") modifiers.push("Ctrl");
+    }
+    return { modifiers, key: key.length === 1 ? key.toUpperCase() : key };
   }
 
   async onunload() {
@@ -1653,17 +1963,23 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
     if (req.method === "GET" && route === "/v1/apps") {
       const category = url.searchParams.get("category");
-      const apps = this.settings.apps
+      const query = (url.searchParams.get("q") || "").trim();
+      let pool = this.settings.apps
         .filter(app => app.selected)
-        .filter(app => !category || app.category === category)
-        .map(app => ({
-          id: app.id,
-          name: app.name,
-          category: app.category || "未分类",
-          pinned: !!app.pinned,
-          description: app.description || "",
-          usage: app.usage || ""
-        }));
+        .filter(app => !category || app.category === category);
+      if (query) {
+        pool = fuzzySearchApps(pool, query).map(item => item.app);
+      }
+      const apps = pool.map(app => ({
+        id: app.id,
+        name: app.name,
+        category: app.category || "未分类",
+        pinned: !!app.pinned,
+        description: app.description || "",
+        usage: app.usage || "",
+        launchCount: app.launchCount || 0,
+        lastLaunchedAt: app.lastLaunchedAt || null
+      }));
       return this.sendAgentJson(res, 200, { ok: true, count: apps.length, apps });
     }
 
@@ -1696,6 +2012,20 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       if (!matches.length) {
         matches = enabledApps.filter(app => app.name.toLocaleLowerCase() === requested.toLocaleLowerCase());
       }
+      // 模糊兜底：精确无果时启用模糊匹配，唯一高分才启动，否则返回候选
+      if (!matches.length && body.fuzzy !== false) {
+        const ranked = fuzzySearchApps(enabledApps, requested);
+        if (ranked.length && ranked[0].score >= 2 && (ranked.length === 1 || ranked[0].score > ranked[1].score * 1.3)) {
+          matches = [ranked[0].app];
+        } else if (ranked.length && ranked[0].score >= 1) {
+          return this.sendAgentJson(res, 409, {
+            ok: false,
+            error: "ambiguous_app",
+            message: "No exact match. Fuzzy candidates returned; retry with a more precise name or an id. Send {\"fuzzy\":false} to disable fuzzy matching.",
+            matches: ranked.slice(0, 5).map(item => ({ id: item.app.id, name: item.app.name, category: item.app.category, score: Math.round(item.score * 100) / 100 }))
+          });
+        }
+      }
       if (!matches.length) {
         return this.sendAgentJson(res, 404, {
           ok: false,
@@ -1724,6 +2054,44 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       });
     }
 
+    // 批量启动：{"ids":["id1","id2"]} 或 {"names":["微信","飞书"]}（精确匹配）
+    if (req.method === "POST" && route === "/v1/launch-batch") {
+      let body;
+      try {
+        body = await this.readAgentBody(req);
+      } catch (error) {
+        return this.sendAgentJson(res, 400, { ok: false, error: "bad_request", message: error.message });
+      }
+      const requested = [
+        ...(Array.isArray(body.ids) ? body.ids : []),
+        ...(Array.isArray(body.names) ? body.names : []),
+        ...(Array.isArray(body.apps) ? body.apps : [])
+      ].map(v => String(v || "").trim()).filter(Boolean);
+      if (!requested.length) {
+        return this.sendAgentJson(res, 400, {
+          ok: false,
+          error: "missing_apps",
+          message: "Send JSON with {\"ids\":[\"id1\",\"id2\"]} or {\"names\":[\"App A\",\"App B\"]}."
+        });
+      }
+      const enabledApps = this.settings.apps.filter(app => app.selected);
+      const results = [];
+      for (const item of requested.slice(0, 20)) {
+        const app = enabledApps.find(a => a.id === item) ||
+          enabledApps.find(a => a.name.toLocaleLowerCase() === item.toLocaleLowerCase());
+        if (!app) {
+          results.push({ requested: item, ok: false, error: "app_not_available" });
+          continue;
+        }
+        const launch = await this.launchApp(app, { silent: true });
+        results.push(launch.ok
+          ? { requested: item, ok: true, id: app.id, name: app.name }
+          : { requested: item, ok: false, error: launch.error || "launch_failed", id: app.id, name: app.name });
+      }
+      const okCount = results.filter(r => r.ok).length;
+      return this.sendAgentJson(res, 200, { ok: okCount > 0, launched: okCount, total: results.length, results });
+    }
+
     return this.sendAgentJson(res, 404, { ok: false, error: "not_found" });
   }
 
@@ -1739,13 +2107,17 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       `Base URL: ${baseUrl}`,
       `Authorization: Bearer ${token}`,
       "",
-      "先查询可启动应用：",
+      "查询可启动应用（支持 ?q=关键词 模糊搜索、?category=分类 过滤，返回含 launchCount 使用统计）：",
       `curl -s "${baseUrl}/v1/apps" -H "Authorization: Bearer ${token}"`,
+      `curl -s "${baseUrl}/v1/apps?q=weixin" -H "Authorization: Bearer ${token}"`,
       "",
-      "启动一个已勾选的应用（将 ChatGPT 替换成目标应用的精确名称）：",
+      "启动一个应用（精确名称或 id；精确无果时自动模糊匹配，候选不唯一会返回 409 及候选列表）：",
       `curl -s -X POST "${baseUrl}/v1/launch" -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{"app":"ChatGPT"}'`,
       "",
-      "Agent 使用规则：先查询 /v1/apps；只允许从返回列表中选择应用；用户明确要求打开时调用 POST /v1/launch。不要使用任意路径或任意 shell 命令代替此接口。"
+      "批量启动（上限 20 个，逐项返回结果）：",
+      `curl -s -X POST "${baseUrl}/v1/launch-batch" -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d '{"names":["微信","飞书"]}'`,
+      "",
+      "Agent 使用规则：先查询 /v1/apps；只允许从返回列表中选择应用；用户明确要求打开时调用 POST /v1/launch 或 /v1/launch-batch。不要使用任意路径或任意 shell 命令代替此接口。"
     ].join("\n");
 
     try {
@@ -1884,7 +2256,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
             name: info.name,
             path: appPath,
             selected: old ? !!old.selected : false,
-            category: old?.category || fallbackCategory(info.name, appPath),
+            category: old?.category || learnedCategory(info.name, this.settings.categoryRules) || fallbackCategory(info.name, appPath),
             pinned: old?.pinned || false,
             order: old?.order,
             description: old?.description || suggested.description,
@@ -1922,6 +2294,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       await this.saveSettings();
       this.scanStatus = `扫描完成：发现 ${results.length} 个应用`;
       new Notice(`扫描完成：发现 ${results.length} 个应用。`, 7000);
+      // 后台构建拼音索引（不阻塞扫描完成）
+      this.buildPinyin(this.settings.apps);
     } catch (error) {
       console.error("[Mac App Launcher] Scan failed", error);
       new Notice(`扫描失败：${error.message || error}`, 8000);
@@ -2156,7 +2530,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       name: info.name,
       path: resolved,
       selected: true,
-      category: (category || "").trim() || fallbackCategory(info.name, resolved),
+      category: (category || "").trim() || learnedCategory(info.name, this.settings.categoryRules) || fallbackCategory(info.name, resolved),
       pinned: false,
       custom: true,
       description: "",
@@ -2169,6 +2543,178 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.settings.apps.push(app);
     await this.saveSettings();
     this.refreshViews();
+    this.buildPinyin([app]);
     return { ok: true, app };
+  }
+
+  // ---- 分类管理 ----
+  getCategories() {
+    const cats = [...(this.settings.categories || [])].sort((a, b) => a.order - b.order);
+    if (!cats.some(c => c.name === "未分类")) {
+      cats.push({ name: "未分类", icon: "❓", order: cats.length });
+    }
+    return cats;
+  }
+
+  categoryIcon(name) {
+    const found = (this.settings.categories || []).find(c => c.name === name);
+    return found ? found.icon : "";
+  }
+
+  async addCategory(name, icon) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return { ok: false, error: "请输入分类名称" };
+    if (this.settings.categories.some(c => c.name === trimmed)) {
+      return { ok: false, error: "分类已存在" };
+    }
+    const maxOrder = Math.max(-1, ...this.settings.categories.map(c => c.order));
+    this.settings.categories.push({ name: trimmed, icon: (icon || "").trim() || "📁", order: maxOrder + 1 });
+    await this.saveSettings();
+    this.refreshViews();
+    return { ok: true };
+  }
+
+  async renameCategory(oldName, newName, icon) {
+    const trimmed = (newName || "").trim();
+    if (!trimmed) return { ok: false, error: "名称不能为空" };
+    const cat = this.settings.categories.find(c => c.name === oldName);
+    if (!cat) return { ok: false, error: "分类不存在" };
+    if (trimmed !== oldName && this.settings.categories.some(c => c.name === trimmed)) {
+      return { ok: false, error: "新名称已被占用" };
+    }
+    cat.name = trimmed;
+    if (typeof icon === "string" && icon.trim()) cat.icon = icon.trim();
+    if (trimmed !== oldName) {
+      for (const app of this.settings.apps) {
+        if (app.category === oldName) app.category = trimmed;
+      }
+      for (const key of Object.keys(this.settings.categoryRules || {})) {
+        if (this.settings.categoryRules[key] === oldName) this.settings.categoryRules[key] = trimmed;
+      }
+    }
+    await this.saveSettings();
+    this.refreshViews();
+    return { ok: true };
+  }
+
+  async removeCategory(name) {
+    if (name === "未分类") return { ok: false, error: "「未分类」不能删除" };
+    this.settings.categories = this.settings.categories.filter(c => c.name !== name);
+    for (const app of this.settings.apps) {
+      if (app.category === name) app.category = "未分类";
+    }
+    for (const key of Object.keys(this.settings.categoryRules || {})) {
+      if (this.settings.categoryRules[key] === name) delete this.settings.categoryRules[key];
+    }
+    await this.saveSettings();
+    this.refreshViews();
+    return { ok: true };
+  }
+
+  async moveCategory(name, dir) {
+    const cats = [...this.settings.categories].sort((a, b) => a.order - b.order);
+    const index = cats.findIndex(c => c.name === name);
+    const target = index + dir;
+    if (index < 0 || target < 0 || target >= cats.length) return;
+    const tmp = cats[index].order;
+    cats[index].order = cats[target].order;
+    cats[target].order = tmp;
+    await this.saveSettings();
+    this.refreshViews();
+  }
+
+  // 归类学习：用户手动改分类时记录应用名 → 分类
+  learnCategory(app) {
+    if (!app.name || !app.category || app.category === "未分类") return;
+    this.settings.categoryRules = this.settings.categoryRules || {};
+    this.settings.categoryRules[String(app.name).toLowerCase()] = app.category;
+  }
+
+  // ---- 场景模式：一键启动一组应用 ----
+  async addScene(name, appIds) {
+    const trimmed = (name || "").trim();
+    if (!trimmed) return { ok: false, error: "请输入场景名称" };
+    if (!appIds || !appIds.length) return { ok: false, error: "请先勾选要加入场景的应用" };
+    if (this.settings.scenes.some(s => s.name === trimmed)) return { ok: false, error: "场景已存在" };
+    this.settings.scenes.push({
+      id: crypto.randomBytes(6).toString("hex"),
+      name: trimmed,
+      appIds: [...appIds]
+    });
+    await this.saveSettings();
+    this.refreshViews();
+    return { ok: true };
+  }
+
+  async removeScene(id) {
+    this.settings.scenes = this.settings.scenes.filter(s => s.id !== id);
+    await this.saveSettings();
+    this.refreshViews();
+  }
+
+  async launchScene(scene) {
+    const apps = scene.appIds
+      .map(id => this.settings.apps.find(a => a.id === id))
+      .filter(Boolean);
+    if (!apps.length) {
+      new Notice(`场景「${scene.name}」里没有可用应用`);
+      return;
+    }
+    for (const app of apps) {
+      await this.launchApp(app, { silent: true });
+    }
+    new Notice(`场景「${scene.name}」已启动 ${apps.length} 个应用`);
+  }
+
+  // ---- 拼音搜索 ----
+  async ensurePinyinHelper() {
+    if (this.cachedPinyinHelper && fs.existsSync(this.cachedPinyinHelper)) {
+      return this.cachedPinyinHelper;
+    }
+    const pluginDir = path.join(this.app.vault.adapter.getBasePath(), this.manifest.dir);
+    const bin = path.join(pluginDir, "pinyin-helper");
+    if (fs.existsSync(bin)) {
+      this.cachedPinyinHelper = bin;
+      return bin;
+    }
+    const src = path.join(pluginDir, "pinyin-helper.swift");
+    if (!fs.existsSync(src)) fs.writeFileSync(src, PINYIN_SWIFT_SOURCE);
+    new Notice("首次使用拼音搜索，正在编译转换组件（约几秒钟）…");
+    await execFileAsync("swiftc", [src, "-o", bin, "-O"]);
+    this.cachedPinyinHelper = bin;
+    return bin;
+  }
+
+  async buildPinyin(apps) {
+    const need = (apps || this.settings.apps).filter(a => !a.pinyinAbbr && /[\u4e00-\u9fff]/.test(a.name || ""));
+    if (!need.length) return;
+    try {
+      const helper = await this.ensurePinyinHelper();
+      const names = need.map(a => a.name);
+      const stdout = await new Promise((resolve, reject) => {
+        const child = spawn(helper, []);
+        let out = "";
+        let err = "";
+        child.stdout.on("data", d => { out += d; });
+        child.stderr.on("data", d => { err += d; });
+        child.on("error", reject);
+        child.on("close", code => code === 0 ? resolve(out.trim()) : reject(new Error(err || `exit ${code}`)));
+        child.stdin.write(JSON.stringify(names));
+        child.stdin.end();
+      });
+      const converted = JSON.parse(stdout);
+      let changed = false;
+      need.forEach((app, i) => {
+        const spaced = String(converted[i] || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim();
+        const words = spaced.split(/\s+/).filter(Boolean);
+        if (!words.length) return;
+        app.pinyinFull = words.join("");
+        app.pinyinAbbr = words.map(w => w[0]).join("");
+        changed = true;
+      });
+      if (changed) await this.saveSettings();
+    } catch (error) {
+      console.warn("[mac-app-launcher] pinyin build failed:", error && error.message || error);
+    }
   }
 };

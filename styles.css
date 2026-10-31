@@ -73,6 +73,25 @@
 .mal-add-custom-row{display:flex;gap:8px;align-items:center}
 .mal-add-path{flex:2}
 .mal-add-category{flex:1}
+
+/* 管理页工具条 / 批量分类 / 分类管理 */
+.mal-manage-toolbar{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.mal-manage-uncat{display:flex;align-items:center;gap:2px;font-size:var(--font-ui-small);color:var(--text-muted);cursor:pointer}
+.mal-batch-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;margin:0 0 10px;border:1px dashed var(--background-modifier-border);border-radius:10px;background:var(--background-secondary)}
+.mal-batch-count{font-size:var(--font-ui-small);font-weight:600}
+.mal-batch-hint{font-size:var(--font-smaller);color:var(--text-faint)}
+.mal-batch-check{accent-color:var(--interactive-accent)}
+.mal-cat-manager{margin:0 0 14px;padding:14px 16px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
+.mal-cat-manager h3{margin:0 0 10px;font-size:var(--font-ui-medium)}
+.mal-cat-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.mal-cat-icon{width:44px;text-align:center;padding:4px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary)}
+.mal-cat-name{flex:1;padding:4px 8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary)}
+.mal-cat-count{font-size:var(--font-smaller);color:var(--text-faint);min-width:60px;text-align:right}
+.mal-cat-move{padding:2px 8px}
+.mal-cat-add{margin-top:8px;padding-top:10px;border-top:1px solid var(--background-modifier-border)}
+.mal-scene-icon{width:44px;text-align:center}
+.mal-scene-name{flex:1;font-weight:600}
+.mal-detail-hotkey{width:100%;padding:6px 10px;border:1px solid var(--background-modifier-border);border-radius:8px;background:var(--background-primary);font-family:var(--font-monospace);font-size:var(--font-ui-small)}
 .mal-detail-label{font-size:var(--font-smaller);font-weight:700;color:var(--text-muted);margin:14px 0 6px}
 .mal-detail-description{line-height:1.65;margin:0;color:var(--text-normal);white-space:pre-wrap}
 .mal-detail-textarea{width:100%;resize:vertical;min-height:76px}

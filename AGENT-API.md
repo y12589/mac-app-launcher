@@ -8,7 +8,7 @@
 
 复制：
 - Base URL（默认 `http://127.0.0.1:43171`，端口冲突时可能自动变化）
-- Bearer Token
+- Bearer Token（1.6.0 起仅生成当次可见，以 SHA-256 哈希存储）
 
 不要把 Token 分享给不可信的人或远程服务。
 
@@ -19,7 +19,16 @@ curl -s "http://127.0.0.1:43171/v1/apps" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-只会返回 Obsidian 插件中已经勾选展示的应用。
+只会返回 Obsidian 插件中已经勾选展示的应用。支持过滤与搜索：
+
+```bash
+# 按分类筛选
+curl -s "http://127.0.0.1:43171/v1/apps?category=AI助手" -H "Authorization: Bearer YOUR_TOKEN"
+# 模糊搜索（支持拼音，如 q=weixin 可匹配微信）
+curl -s "http://127.0.0.1:43171/v1/apps?q=weixin" -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+返回字段含 `launchCount` / `lastLaunchedAt`（使用频率统计）。
 
 ## 第三步：启动指定应用
 
@@ -31,16 +40,30 @@ curl -s -X POST "http://127.0.0.1:43171/v1/launch" \
 ```
 
 也可用应用 ID：
+
 ```json
 {"id":"APP_ID"}
 ```
 
+精确名称 / ID 无果时会自动模糊匹配：唯一高分候选直接启动；候选不唯一返回 `409 ambiguous_app` 及候选列表（含匹配分），换更精确的名称或 id 重试即可。传 `{"fuzzy":false}` 可关闭模糊匹配。
+
+## 批量启动
+
+```bash
+curl -s -X POST "http://127.0.0.1:43171/v1/launch-batch" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"names":["微信","飞书"]}'
+```
+
+支持 `ids` / `names` / `apps` 三种数组字段（可混用），单次上限 20 个，逐项返回启动结果。
+
 ## Agent 的建议系统指令
 
 当用户要求打开、启动或切换到某个 Mac 客户端时：
-1. 请求 `GET /v1/apps` 获取当前允许启动的应用列表。
-2. 只使用列表中精确匹配的 `name` 或 `id`。
-3. 请求 `POST /v1/launch` 启动该应用。
+1. 请求 `GET /v1/apps`（可用 `?q=` 搜索）获取当前允许启动的应用列表。
+2. 优先使用列表中的 `name` 或 `id`。
+3. 请求 `POST /v1/launch` 启动该应用，多个应用用 `POST /v1/launch-batch`。
 4. 根据 API 返回的 `ok` 字段判断是否成功。
 5. 如果应用不在列表中，告知用户先在 Obsidian 的 Mac App Launcher 中勾选该应用。
 6. 不要猜测路径，不要执行任意 `open` 命令来绕过插件的允许列表。
@@ -48,10 +71,10 @@ curl -s -X POST "http://127.0.0.1:43171/v1/launch" \
 ## 接口
 
 - `GET /v1/health`：健康检查，无需令牌。
-- `GET /v1/apps`：返回已勾选的应用。
-- `GET /v1/apps?category=AI助手`：按分类筛选。
+- `GET /v1/apps`：返回已勾选的应用（含使用统计）。支持 `?category=` 与 `?q=`。
 - `GET /v1/categories`：返回分类列表。
-- `POST /v1/launch`：启动指定应用。
+- `POST /v1/launch`：启动指定应用（支持模糊匹配兜底）。
+- `POST /v1/launch-batch`：批量启动，上限 20 个。
 
 除健康检查外均需要 `Authorization: Bearer YOUR_TOKEN`。
 
@@ -60,5 +83,6 @@ curl -s -X POST "http://127.0.0.1:43171/v1/launch" \
 - API 只监听 `127.0.0.1`，不是局域网服务。
 - 所有启动目标都从插件保存的已勾选应用列表中解析。
 - API 不接受任意 `.app` 路径，也不提供 shell 执行接口。
+- 令牌以 SHA-256 哈希存储，明文不落盘；限速每来源 IP 每分钟 120 次。
 - 退出 Obsidian 或禁用插件后，API 停止。
 - 可在插件管理页面重置 Token。
