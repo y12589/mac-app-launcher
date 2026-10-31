@@ -30,6 +30,117 @@ function appId(appPath) {
   return crypto.createHash("sha1").update(appPath).digest("hex").slice(0, 16);
 }
 
+// ---- 性能工具：图标内存缓存 ----
+class IconCache {
+  constructor(maxSize = 200) {
+    this.cache = new Map();
+    this.maxSize = maxSize;
+    this.pending = new Map(); // 正在读取中的 Promise，避免重复读
+  }
+
+  get(appId) {
+    const entry = this.cache.get(appId);
+    if (!entry) return null;
+    entry.atime = Date.now();
+    return entry.dataUrl;
+  }
+
+  set(appId, dataUrl) {
+    if (this.cache.size >= this.maxSize) {
+      // 淘汰最久未使用的
+      let oldestKey = null;
+      let oldestTime = Infinity;
+      for (const [key, val] of this.cache) {
+        if (val.atime < oldestTime) {
+          oldestTime = val.atime;
+          oldestKey = key;
+        }
+      }
+      if (oldestKey) this.cache.delete(oldestKey);
+    }
+    this.cache.set(appId, { dataUrl, atime: Date.now() });
+  }
+
+  invalidate(appId) {
+    this.cache.delete(appId);
+    this.pending.delete(appId);
+  }
+
+  clear() {
+    this.cache.clear();
+    this.pending.clear();
+  }
+
+  async load(appId, iconPath, fs) {
+    const cached = this.get(appId);
+    if (cached) return cached;
+    if (this.pending.has(appId)) return this.pending.get(appId);
+    const promise = (async () => {
+      try {
+        const data = fs.readFileSync(iconPath).toString("base64");
+        const dataUrl = `data:image/png;base64,${data}`;
+        this.set(appId, dataUrl);
+        return dataUrl;
+      } catch (err) {
+        return null;
+      } finally {
+        this.pending.delete(appId);
+      }
+    })();
+    this.pending.set(appId, promise);
+    return promise;
+  }
+}
+
+// ---- 性能工具：防抖 ----
+function debounce(fn, wait = 150) {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), wait);
+  };
+}
+
+// ---- 搜索工具：模糊匹配 ----
+function fuzzyScore(query, text) {
+  if (!query) return 1;
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  if (t.includes(q)) {
+    // 连续匹配得分更高，前缀匹配最高
+    const idx = t.indexOf(q);
+    return 2 + (idx === 0 ? 1 : 0) + q.length / t.length;
+  }
+  // 子序列匹配
+  let qi = 0;
+  let score = 0;
+  let lastMatch = -1;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) {
+      score += lastMatch === -1 || i - lastMatch <= 2 ? 1 : 0.3;
+      lastMatch = i;
+      qi++;
+    }
+  }
+  return qi === q.length ? score / q.length : 0;
+}
+
+function fuzzySearchApps(apps, query) {
+  if (!query.trim()) return apps.map(app => ({ app, score: 1 }));
+  const q = query.trim();
+  const results = [];
+  for (const app of apps) {
+    const nameScore = fuzzyScore(q, app.name) * 3;
+    const catScore = fuzzyScore(q, app.category || "") * 1.2;
+    const descScore = fuzzyScore(q, app.description || "") * 0.8;
+    const usageScore = fuzzyScore(q, app.usage || "") * 0.6;
+    const score = nameScore + catScore + descScore + usageScore;
+    if (score > 0.2) results.push({ app, score });
+  }
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
 function isNestedInsideAnotherApp(appPath) {
   const parts = path.resolve(appPath).split(path.sep).filter(Boolean);
   return parts.slice(0, -1).some(part => part.toLowerCase().endsWith(".app"));
@@ -217,6 +328,12 @@ class MacAppLauncherView extends ItemView {
     this.activeCategory = "__all__";
     this.detailAppId = null;
     this.editingDetail = false;
+    this.bodyEl = null;
+    // 防抖搜索：150ms 内连续输入不重绘
+    this.debouncedSearch = debounce(term => {
+      this.searchTerm = term;
+      if (this.bodyEl) this.renderBody(this.bodyEl);
+    }, 150);
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -280,9 +397,9 @@ class MacAppLauncherView extends ItemView {
     }
 
     const body = root.createDiv({ cls: "mal-body" });
+    this.bodyEl = body;
     search.addEventListener("input", () => {
-      this.searchTerm = search.value;
-      this.renderBody(body);
+      this.debouncedSearch(search.value);
     });
     this.renderBody(body);
   }
@@ -693,6 +810,250 @@ class MacAppLauncherView extends ItemView {
   }
 }
 
+// ---- 快速启动面板（类 Spotlight） ----
+class QuickLaunchModal {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.isOpen = false;
+    this.selectedIndex = 0;
+    this.query = "";
+    this.results = [];
+    this.modalEl = null;
+    this.inputEl = null;
+    this.listEl = null;
+    this._onKeyDown = this.handleKeyDown.bind(this);
+    this._onInput = debounce(() => this.updateResults(), 80);
+    this._onClickOutside = event => {
+      if (this.modalEl && event.target === this.modalEl) this.close();
+    };
+  }
+
+  open() {
+    if (this.isOpen) return;
+    this.isOpen = true;
+    this.selectedIndex = 0;
+    this.query = "";
+    this.build();
+    this.updateResults();
+    // 等下一帧再聚焦，确保元素已挂载
+    setTimeout(() => this.inputEl && this.inputEl.focus(), 10);
+    document.addEventListener("keydown", this._onKeyDown, true);
+  }
+
+  close() {
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    document.removeEventListener("keydown", this._onKeyDown, true);
+    if (this.modalEl && this.modalEl.parentNode) {
+      this.modalEl.parentNode.removeChild(this.modalEl);
+    }
+    this.modalEl = null;
+    this.inputEl = null;
+    this.listEl = null;
+  }
+
+  build() {
+    const overlay = document.createElement("div");
+    overlay.className = "mal-quick-launch-overlay";
+    overlay.addEventListener("click", this._onClickOutside);
+
+    const panel = document.createElement("div");
+    panel.className = "mal-quick-launch-panel";
+
+    const searchWrap = document.createElement("div");
+    searchWrap.className = "mal-quick-launch-search-wrap";
+    const icon = document.createElement("span");
+    icon.className = "mal-quick-launch-search-icon";
+    icon.textContent = "⌘";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "mal-quick-launch-input";
+    input.placeholder = "搜索应用并启动…";
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    input.addEventListener("input", () => {
+      this.query = input.value;
+      this.selectedIndex = 0;
+      this._onInput();
+    });
+    searchWrap.appendChild(icon);
+    searchWrap.appendChild(input);
+
+    const list = document.createElement("div");
+    list.className = "mal-quick-launch-list";
+
+    const hint = document.createElement("div");
+    hint.className = "mal-quick-launch-hint";
+    hint.innerHTML = "<span>↑↓</span> 选择 <span>↵</span> 启动 <span>Esc</span> 关闭";
+
+    panel.appendChild(searchWrap);
+    panel.appendChild(list);
+    panel.appendChild(hint);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    this.modalEl = overlay;
+    this.inputEl = input;
+    this.listEl = list;
+  }
+
+  updateResults() {
+    const apps = this.plugin.settings.apps.filter(app => app.selected);
+    const searched = fuzzySearchApps(apps, this.query);
+    // 最多显示 12 个，避免列表过长
+    this.results = searched.slice(0, 12).map(item => item.app);
+    if (this.selectedIndex >= this.results.length) {
+      this.selectedIndex = Math.max(0, this.results.length - 1);
+    }
+    this.renderList();
+  }
+
+  renderList() {
+    if (!this.listEl) return;
+    this.listEl.innerHTML = "";
+    if (!this.results.length) {
+      const empty = document.createElement("div");
+      empty.className = "mal-quick-launch-empty";
+      empty.textContent = this.query ? "没有匹配的应用" : "还没有选择任何应用";
+      this.listEl.appendChild(empty);
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    this.results.forEach((app, index) => {
+      const item = document.createElement("div");
+      item.className = `mal-quick-launch-item ${index === this.selectedIndex ? "is-selected" : ""}`;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", index === this.selectedIndex ? "true" : "false");
+
+      const iconDiv = document.createElement("div");
+      iconDiv.className = "mal-quick-launch-item-icon";
+      this.plugin.iconCache.get(app.id)
+        ? (() => {
+            const img = document.createElement("img");
+            img.src = this.plugin.iconCache.get(app.id);
+            img.alt = "";
+            img.className = "mal-native-icon";
+            iconDiv.appendChild(img);
+            return true;
+          })()
+        : (() => {
+            iconDiv.textContent = "📦";
+            iconDiv.className += " mal-fallback-icon";
+            if (app.iconPath && fs.existsSync(app.iconPath)) {
+              this.plugin.iconCache.load(app.id, app.iconPath, fs).then(dataUrl => {
+                if (dataUrl && this.listEl && this.listEl.contains(item)) {
+                  iconDiv.innerHTML = "";
+                  iconDiv.className = "mal-quick-launch-item-icon";
+                  const img = document.createElement("img");
+                  img.src = dataUrl;
+                  img.alt = "";
+                  img.className = "mal-native-icon mal-icon-fade-in";
+                  iconDiv.appendChild(img);
+                }
+              });
+            }
+            return false;
+          })();
+
+      const info = document.createElement("div");
+      info.className = "mal-quick-launch-item-info";
+      const name = document.createElement("div");
+      name.className = "mal-quick-launch-item-name";
+      name.textContent = app.name;
+      const meta = document.createElement("div");
+      meta.className = "mal-quick-launch-item-meta";
+      meta.textContent = app.category || "未分类";
+      info.appendChild(name);
+      info.appendChild(meta);
+
+      const shortcut = document.createElement("div");
+      shortcut.className = "mal-quick-launch-item-shortcut";
+      shortcut.textContent = "↵";
+
+      item.appendChild(iconDiv);
+      item.appendChild(info);
+      item.appendChild(shortcut);
+
+      item.addEventListener("click", () => {
+        this.selectedIndex = index;
+        this.launchSelected();
+      });
+      item.addEventListener("mouseenter", () => {
+        this.selectedIndex = index;
+        this.updateSelection();
+      });
+
+      frag.appendChild(item);
+    });
+    this.listEl.appendChild(frag);
+    this.ensureSelectedVisible();
+  }
+
+  updateSelection() {
+    if (!this.listEl) return;
+    const items = this.listEl.querySelectorAll(".mal-quick-launch-item");
+    items.forEach((item, i) => {
+      if (i === this.selectedIndex) {
+        item.classList.add("is-selected");
+        item.setAttribute("aria-selected", "true");
+      } else {
+        item.classList.remove("is-selected");
+        item.setAttribute("aria-selected", "false");
+      }
+    });
+    this.ensureSelectedVisible();
+  }
+
+  ensureSelectedVisible() {
+    if (!this.listEl) return;
+    const items = this.listEl.querySelectorAll(".mal-quick-launch-item");
+    const selected = items[this.selectedIndex];
+    if (!selected) return;
+    const listRect = this.listEl.getBoundingClientRect();
+    const itemRect = selected.getBoundingClientRect();
+    if (itemRect.top < listRect.top) {
+      selected.scrollIntoView({ block: "start" });
+    } else if (itemRect.bottom > listRect.bottom) {
+      selected.scrollIntoView({ block: "end" });
+    }
+  }
+
+  handleKeyDown(event) {
+    if (!this.isOpen) return;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        if (this.results.length) {
+          this.selectedIndex = (this.selectedIndex + 1) % this.results.length;
+          this.updateSelection();
+        }
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        if (this.results.length) {
+          this.selectedIndex = (this.selectedIndex - 1 + this.results.length) % this.results.length;
+          this.updateSelection();
+        }
+        break;
+      case "Enter":
+        event.preventDefault();
+        this.launchSelected();
+        break;
+      case "Escape":
+        event.preventDefault();
+        this.close();
+        break;
+    }
+  }
+
+  launchSelected() {
+    const app = this.results[this.selectedIndex];
+    if (!app) return;
+    this.plugin.launchApp(app);
+    this.close();
+  }
+}
+
 class MacAppLauncherSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -837,6 +1198,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.scanTotal = 0;
     this.scanStatus = "";
     this.iconJobs = new Map();
+    this.iconCache = new IconCache(300); // 图标内存缓存，LRU 淘汰
 
     this.registerView(VIEW_TYPE, leaf => new MacAppLauncherView(leaf, this));
     this.addSettingTab(new MacAppLauncherSettingTab(this.app, this));
@@ -850,6 +1212,14 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       id: "scan-mac-apps",
       name: "扫描本机已安装应用",
       callback: () => this.scanInstalledApps()
+    });
+    // 快速启动命令（可绑定全局快捷键）
+    this.quickLaunch = new QuickLaunchModal(this);
+    this.addCommand({
+      id: "quick-launch-app",
+      name: "快速启动应用",
+      hotkeys: [{ modifiers: ["Mod", "Shift"], key: " " }],
+      callback: () => this.quickLaunch.open()
     });
     await this.saveSettings();
     if (this.settings.agentApiEnabled) {
@@ -1503,17 +1873,28 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   renderAppIcon(container, app) {
     container.empty();
+    const cached = this.iconCache.get(app.id);
+    if (cached) {
+      container.createEl("img", {
+        attr: { src: cached, alt: "", draggable: "false" },
+        cls: "mal-native-icon"
+      });
+      return;
+    }
     if (app.iconPath && fs.existsSync(app.iconPath)) {
-      try {
-        const data = fs.readFileSync(app.iconPath).toString("base64");
-        container.createEl("img", {
-          attr: { src: `data:image/png;base64,${data}`, alt: "", draggable: "false" },
-          cls: "mal-native-icon"
-        });
-        return;
-      } catch (error) {
-        console.warn("[Mac App Launcher] Could not read icon", error);
-      }
+      // 异步加载图标，加载完后只更新这一个容器
+      this.iconCache.load(app.id, app.iconPath, fs).then(dataUrl => {
+        if (dataUrl) {
+          container.empty();
+          container.createEl("img", {
+            attr: { src: dataUrl, alt: "", draggable: "false" },
+            cls: "mal-native-icon mal-icon-fade-in"
+          });
+        }
+      });
+      // 先显示占位符，避免布局跳动
+      container.createEl("span", { text: "📦", cls: "mal-fallback-icon" });
+      return;
     }
     container.createEl("span", { text: "📦", cls: "mal-fallback-icon" });
     if (app.selected) this.ensureIcon(app);

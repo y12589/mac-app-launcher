@@ -1,9 +1,1 @@
-{
-  "id": "mac-app-launcher",
-  "name": "Mac App Launcher",
-  "version": "1.4.1",
-  "minAppVersion": "1.13.0",
-  "description": "A macOS app workspace with top-pinned apps, drag sorting, category navigation, editable app profiles, native icons, one-click launching, and a localhost Agent API.",
-  "author": "OpenAI",
-  "isDesktopOnly": true
-}
+{"id":"mac-app-launcher","name":"Mac App Launcher","version":"1.5.0","minAppVersion":"1.13.0","description":"A macOS app workspace with top-pinned apps, drag sorting, category navigation, editable app profiles, native icons, one-click launching, Spotlight-style quick launch, and a localhost Agent API.","author":"OpenAI","isDesktopOnly":true}
