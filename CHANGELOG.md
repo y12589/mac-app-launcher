@@ -1,5 +1,11 @@
 # 更新日志
 
+## [1.13.0] - 2026-10-31
+
+### 新增
+- 公开 `window.MacAppLauncher` API：`launch(name)` 模糊启动应用、`launchScene(name)` 启动场景、`apps()` 列出已勾选应用。QuickAdd 宏、Templater 用户脚本、其他插件可直接调用，例如 `await MacAppLauncher.launch("VS Code")`。
+- 配置导入导出：设置页「配置管理」一键导出应用列表、场景、分类与归类规则为 JSON 到剪贴板；在其他 Vault 粘贴导入即可复刻整套工作环境（导入会覆盖当前配置）。
+
 ## [1.12.0] - 2026-10-31
 
 ### 新增

@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.13.0", changes: ["开放 window.MacAppLauncher API，QuickAdd / Templater 可直接启动应用与场景", "配置导入导出：应用、场景、分类一键跨 Vault 迁移"] },
   { version: "1.12.0", changes: ["编辑器类应用可直接打开当前 Vault，终端类应用可进入当前笔记目录"] },
   { version: "1.11.0", changes: ["启动日志可自动写入每日笔记（默认关闭，设置页开启）"] },
   { version: "1.10.0", changes: ["应用知识库：一键为应用创建资料卡笔记，详情弹窗展示反向链接"] },
@@ -1583,6 +1584,42 @@ class QuickLaunchModal {
   }
 }
 
+// ---- 导入配置弹窗 ----
+class ImportConfigModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "导入配置" });
+    contentEl.createEl("p", {
+      text: "粘贴由「导出配置」生成的 JSON。导入会覆盖当前的应用列表、场景与分类。",
+      cls: "mal-detail-meta"
+    });
+    const textarea = contentEl.createEl("textarea", {
+      cls: "mal-import-textarea",
+      attr: { rows: "10", spellcheck: "false", placeholder: '{"apps":[…],"scenes":[…],"categories":[…]}' }
+    });
+    const row = contentEl.createDiv({ cls: "mal-detail-edit-actions" });
+    const ok = row.createEl("button", { text: "确认导入", cls: "mal-primary" });
+    ok.addEventListener("click", async () => {
+      const result = await this.plugin.importConfig(textarea.value);
+      if (result.ok) {
+        new Notice(`已导入 ${result.apps} 个应用、${result.scenes} 个场景`);
+        this.close();
+      } else {
+        new Notice(`导入失败：${result.error}`, 7000);
+      }
+    });
+    const cancel = row.createEl("button", { text: "取消", cls: "mal-button" });
+    cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
 // ---- 关于弹窗：作者、版本、内置更新日志 ----
 class AboutModal extends Modal {
   constructor(app, plugin) {
@@ -1809,6 +1846,20 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    // ── 配置管理 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "配置管理" });
+
+    new Setting(containerEl)
+      .setName("导入 / 导出配置")
+      .setDesc("导出应用列表、场景与分类为 JSON，可粘贴到其他 Vault 导入；导入会覆盖当前配置。")
+      .addButton(btn => btn.setButtonText("导出到剪贴板").onClick(async () => {
+        await navigator.clipboard.writeText(this.plugin.exportConfig());
+        new Notice("配置已复制到剪贴板");
+      }))
+      .addButton(btn => btn.setButtonText("导入…").onClick(() => {
+        new ImportConfigModal(this.app, this.plugin).open();
+      }));
+
     // ── 关于 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "关于" });
 
@@ -1950,6 +2001,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor("app-launcher", (source, el) => this.renderLauncherBlock(source, el));
     // 文件列表右键菜单：按类型打开 / 启动绑定场景
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.buildFileMenu(menu, file)));
+    // 公开 API：供 QuickAdd / Templater 等插件调用
+    this.registerPublicApi();
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
       setTimeout(() => {
@@ -2018,10 +2071,86 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.scanCancelled = true;
     await this.stopAgentServer();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+    if (window.MacAppLauncher) delete window.MacAppLauncher;
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // ---- 配置导入导出：跨 Vault 迁移应用、场景与分类 ----
+  exportConfig() {
+    const { apps, scenes, categories, categoryRules } = this.settings;
+    return JSON.stringify({ version: this.manifest.version, apps, scenes, categories, categoryRules }, null, 2);
+  }
+
+  async importConfig(text) {
+    let data;
+    try {
+      data = JSON.parse(String(text || ""));
+    } catch (e) {
+      return { ok: false, error: "JSON 格式无效" };
+    }
+    if (!data || !Array.isArray(data.apps)) return { ok: false, error: "缺少 apps 数组" };
+    this.settings.apps = data.apps.map((app, index) => normalizeApp(app, index));
+    if (Array.isArray(data.scenes)) {
+      this.settings.scenes = data.scenes.filter(s => s && s.name).map(s => ({
+        id: String(s.id || crypto.randomBytes(6).toString("hex")),
+        name: String(s.name),
+        appIds: Array.isArray(s.appIds) ? s.appIds : []
+      }));
+    }
+    if (Array.isArray(data.categories) && data.categories.length) {
+      this.settings.categories = data.categories.filter(c => c && c.name).map((c, i) => ({
+        name: String(c.name),
+        icon: typeof c.icon === "string" ? c.icon : "📁",
+        order: Number.isFinite(Number(c.order)) ? Number(c.order) : i
+      }));
+    }
+    if (data.categoryRules && typeof data.categoryRules === "object" && !Array.isArray(data.categoryRules)) {
+      this.settings.categoryRules = data.categoryRules;
+    }
+    this.settings.hasScanned = true;
+    await this.saveSettings();
+    this.refreshAppHotkeys();
+    this.refreshSceneCommands();
+    this.refreshViews();
+    return { ok: true, apps: this.settings.apps.length, scenes: this.settings.scenes.length };
+  }
+
+  // ---- 公开 API：供 QuickAdd 宏、Templater 脚本调用 ----
+  findAppByQuery(query) {
+    const apps = this.settings.apps.filter(a => a.selected);
+    const q = String(query || "").trim();
+    if (!q) return null;
+    const lower = q.toLowerCase();
+    let target = apps.find(a => a.id === q) ||
+      apps.find(a => (a.name || "").toLowerCase() === lower) ||
+      apps.find(a => (a.name || "").toLowerCase().includes(lower));
+    if (!target) {
+      const ranked = fuzzySearchApps(apps, q);
+      target = ranked.length ? ranked[0].app : null;
+    }
+    return target;
+  }
+
+  registerPublicApi() {
+    window.MacAppLauncher = {
+      // 启动应用（精确名 → 子串 → 模糊），返回 Promise<{ok}>
+      launch: name => {
+        const app = this.findAppByQuery(name);
+        if (!app) return Promise.resolve({ ok: false, error: `找不到应用：${name}` });
+        return this.launchApp(app, { silent: true });
+      },
+      // 启动场景
+      launchScene: name => {
+        const scene = (this.settings.scenes || []).find(s => s.name === String(name || ""));
+        if (!scene) return Promise.resolve({ ok: false, error: `找不到场景：${name}` });
+        return this.launchScene(scene).then(() => ({ ok: true }));
+      },
+      // 列出已勾选应用
+      apps: () => this.settings.apps.filter(a => a.selected).map(a => ({ name: a.name, category: a.category }))
+    };
   }
 
   async startAgentServer() {
