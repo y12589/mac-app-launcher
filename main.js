@@ -11,6 +11,8 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.8.0", changes: ["当前笔记智能推荐相关应用", "笔记内嵌 app-launcher 启动卡片", "场景注册到命令面板，一键启动"] },
+  { version: "1.7.6", changes: ["设置页新增关于弹窗，内置更新日志"] },
   { version: "1.7.5", changes: ["关闭场景改为 bundle ID 匹配，中文名应用也能准确退出"] },
   { version: "1.7.4", changes: ["更新下载失败自动重试，支持自定义加速镜像", "启动 Obsidian 可自动拉起指定场景", "场景错峰启动，新增一键关闭场景"] },
   { version: "1.7.3", changes: ["作者名改为阎大大，插件介绍改为中文"] },
@@ -481,6 +483,35 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
+  // 当前笔记推荐区：根据笔记名、文件夹与标签匹配应用，点击直接启动
+  renderNoteRecommendations(body) {
+    const recs = this.plugin.getNoteRecommendations(4);
+    if (!recs.length) return;
+    const file = this.plugin.getActiveNoteFile();
+    const section = body.createDiv({ cls: "mal-note-recs" });
+    section.createEl("h3", {
+      text: `✨ 当前笔记推荐${file ? `：${file.basename}` : ""}`,
+      cls: "mal-category"
+    });
+    const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
+    for (const app of recs) {
+      const card = grid.createDiv({
+        cls: "mal-app-card",
+        attr: { tabindex: "0", role: "button", "aria-label": `启动 ${app.name}`, title: `启动 ${app.name}` }
+      });
+      const icon = card.createDiv({ cls: "mal-app-icon" });
+      this.plugin.renderAppIcon(icon, app);
+      card.createDiv({ text: app.name, cls: "mal-app-name" });
+      card.addEventListener("click", () => this.plugin.launchApp(app));
+      card.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          this.plugin.launchApp(app);
+        }
+      });
+    }
+  }
+
   renderHome(body, term) {
     this.renderProgress(body);
     const selected = this.plugin.settings.apps.filter(app => app.selected);
@@ -497,6 +528,7 @@ class MacAppLauncherView extends ItemView {
     const filteredSearch = selected.filter(app =>
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
+    if (!term) this.renderNoteRecommendations(body);
     this.renderCategoryNav(body, selected, term);
 
     if (!filteredSearch.length) {
@@ -1785,6 +1817,13 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.buildPinyin(this.settings.apps);
     // 注册单应用快捷键
     this.refreshAppHotkeys();
+    // 注册场景启动命令
+    this.refreshSceneCommands();
+    // 当前笔记切换 / 标签变更时刷新推荐区
+    this.registerEvent(this.app.workspace.on("file-open", () => this.refreshViews()));
+    this.registerEvent(this.app.metadataCache.on("changed", debounce(() => this.refreshViews(), 500)));
+    // 笔记内嵌应用启动卡片：```app-launcher 代码块
+    this.registerMarkdownCodeBlockProcessor("app-launcher", (source, el) => this.renderLauncherBlock(source, el));
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
       setTimeout(() => {
@@ -1811,6 +1850,23 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         name: `启动：${app.name}`,
         hotkeys: [this.parseHotkey(app.hotkey)].filter(Boolean),
         callback: () => this.launchApp(app)
+      });
+    }
+  }
+
+  // ---- 场景命令：每个场景注册一条命令面板指令 ----
+  refreshSceneCommands() {
+    const commands = this.app.commands;
+    for (const id of Object.keys(commands.commands)) {
+      if (id.startsWith(`${this.manifest.id}:launch-scene-`)) {
+        commands.removeCommand(id);
+      }
+    }
+    for (const scene of this.settings.scenes) {
+      this.addCommand({
+        id: `launch-scene-${scene.id}`,
+        name: `启动场景：${scene.name}`,
+        callback: () => this.launchScene(scene)
       });
     }
   }
@@ -2644,6 +2700,105 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     });
   }
 
+  // ---- 当前笔记推荐：根据笔记名、父文件夹与标签匹配应用 ----
+  // 切到应用中心等无文件视图时，沿用最近打开过的笔记
+  getActiveNoteFile() {
+    const file = this.app.workspace.getActiveFile();
+    if (file) {
+      this.lastNoteFile = file;
+      return file;
+    }
+    if (this.lastNoteFile && this.app.vault.getAbstractFileByPath(this.lastNoteFile.path)) {
+      return this.lastNoteFile;
+    }
+    return null;
+  }
+
+  getNoteRecommendations(limit = 4) {
+    const file = this.getActiveNoteFile();
+    if (!file) return [];
+    const terms = new Set();
+    const addTerm = text => {
+      const t = String(text || "").trim().replace(/^#/, "");
+      if (t.length >= 2) terms.add(t);
+    };
+    const splitWords = text => String(text || "").split(/[\s\-_—–·:：/\\|]+/).forEach(addTerm);
+    addTerm(file.basename);
+    splitWords(file.basename);
+    if (file.parent && file.parent.name) {
+      addTerm(file.parent.name);
+      splitWords(file.parent.name);
+    }
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (cache) {
+      (cache.tags || []).forEach(t => addTerm(t.tag));
+      const fmTags = cache.frontmatter && (cache.frontmatter.tags || cache.frontmatter.tag);
+      if (Array.isArray(fmTags)) fmTags.forEach(addTerm);
+      else if (typeof fmTags === "string") fmTags.split(/[,\s]+/).forEach(addTerm);
+    }
+    if (!terms.size) return [];
+    const apps = this.settings.apps.filter(a => a.selected);
+    const best = new Map();
+    for (const term of terms) {
+      for (const hit of fuzzySearchApps(apps, term)) {
+        const prev = best.get(hit.app);
+        if (!prev || hit.score > prev) best.set(hit.app, hit.score);
+      }
+    }
+    return [...best.entries()]
+      .filter(([, score]) => score >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([app]) => app);
+  }
+
+  // ---- Markdown 启动卡片：```app-launcher 代码块 ----
+  renderLauncherBlock(source, el) {
+    el.empty();
+    el.addClass("mal-md-block");
+    const queries = [];
+    let note = "";
+    for (const raw of String(source || "").split(/\r?\n/)) {
+      const m = raw.match(/^\s*([^:：\s]+)\s*[:：]\s*(.+?)\s*$/);
+      if (!m) {
+        // 无 key 的裸行按应用名处理
+        if (raw.trim() && !queries.length && !note) queries.push(raw.trim());
+        continue;
+      }
+      const key = m[1].toLowerCase();
+      if (key === "app" || key === "应用") queries.push(m[2]);
+      else if (key === "note" || key === "说明") note = m[2];
+    }
+    if (!queries.length) {
+      el.createDiv({ text: "用法：在 app-launcher 代码块中写「app: 应用名称」", cls: "mal-md-empty" });
+      return;
+    }
+    const apps = this.settings.apps.filter(a => a.selected);
+    for (const query of queries) {
+      const q = query.toLowerCase();
+      let target = apps.find(a => a.id === query) ||
+        apps.find(a => (a.name || "").toLowerCase() === q) ||
+        apps.find(a => (a.name || "").toLowerCase().includes(q));
+      if (!target) {
+        const ranked = fuzzySearchApps(apps, query);
+        target = ranked.length ? ranked[0].app : null;
+      }
+      if (!target) {
+        el.createDiv({ text: `找不到应用「${query}」，请确认已在应用中心勾选`, cls: "mal-md-empty" });
+        continue;
+      }
+      const card = el.createDiv({ cls: "mal-md-card" });
+      const icon = card.createDiv({ cls: "mal-md-icon" });
+      this.renderAppIcon(icon, target);
+      const info = card.createDiv({ cls: "mal-md-info" });
+      info.createDiv({ text: target.name, cls: "mal-md-name" });
+      const desc = note || target.description || target.usage || target.category || "";
+      if (desc) info.createDiv({ text: desc, cls: "mal-md-desc" });
+      const btn = card.createEl("button", { text: "打开", cls: "mal-md-open" });
+      btn.addEventListener("click", () => this.launchApp(target));
+    }
+  }
+
   // 在 Finder 中显示应用
   revealInFinder(app) {
     if (!app.path) return;
@@ -2792,6 +2947,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       appIds: [...appIds]
     });
     await this.saveSettings();
+    this.refreshSceneCommands();
     this.refreshViews();
     return { ok: true };
   }
@@ -2800,6 +2956,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.settings.scenes = this.settings.scenes.filter(s => s.id !== id);
     if (this.settings.autoLaunchSceneId === id) this.settings.autoLaunchSceneId = "";
     await this.saveSettings();
+    this.refreshSceneCommands();
     this.refreshViews();
   }
 
