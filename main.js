@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.12.0", changes: ["编辑器类应用可直接打开当前 Vault，终端类应用可进入当前笔记目录"] },
   { version: "1.11.0", changes: ["启动日志可自动写入每日笔记（默认关闭，设置页开启）"] },
   { version: "1.10.0", changes: ["应用知识库：一键为应用创建资料卡笔记，详情弹窗展示反向链接"] },
   { version: "1.9.0", changes: ["Frontmatter 应用绑定：笔记用 apps / app-scene 声明工作环境", "文件列表右键菜单：按文件类型推荐应用打开、启动绑定场景"] },
@@ -763,6 +764,23 @@ class MacAppLauncherView extends ItemView {
           .setTitle("打开 / 创建应用笔记")
           .setIcon("file-text")
           .onClick(() => this.plugin.openAppNote(app)));
+        // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
+        if (this.plugin.isEditorApp(app)) {
+          menu.addItem(item => item
+            .setTitle(`用 ${app.name} 打开当前库`)
+            .setIcon("vault")
+            .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
+        }
+        if (this.plugin.isTerminalApp(app)) {
+          const note = this.plugin.getActiveNoteFile();
+          const dir = note && note.parent && note.parent.path
+            ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
+            : this.app.vault.adapter.getBasePath();
+          menu.addItem(item => item
+            .setTitle(`在 ${app.name} 中打开${note && note.parent && note.parent.path ? "笔记目录" : "库根目录"}`)
+            .setIcon("terminal")
+            .onClick(() => this.plugin.openPathWithApp(app, dir)));
+        }
         if (app.custom) {
           menu.addSeparator();
           menu.addItem(item => item
@@ -3071,6 +3089,31 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       const btn = card.createEl("button", { text: "打开", cls: "mal-md-open" });
       btn.addEventListener("click", () => this.launchApp(target));
     }
+  }
+
+  // ---- 启动参数白名单：仅允许把目录路径交给编辑器 / 终端类应用 ----
+  isEditorApp(app) {
+    const s = `${app.name} ${app.path}`.toLowerCase();
+    return /visual studio code|vscode|cursor|trae|qoder|xcode|webstorm|pycharm|intellij|goland|rider|sublime|zed|nova|textmate|bbedit|typora/.test(s);
+  }
+
+  isTerminalApp(app) {
+    const s = `${app.name} ${app.path}`.toLowerCase();
+    return /terminal|iterm|warp|kitty|alacritty|wezterm|hyper|终端/.test(s);
+  }
+
+  // 只允许传目录路径，拒绝文件与可疑参数
+  openPathWithApp(app, dirPath) {
+    if (!app || !app.path || !dirPath) return;
+    const resolved = path.resolve(dirPath);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      new Notice("目标目录不存在");
+      return;
+    }
+    execFile("/usr/bin/open", ["-a", app.path, resolved], err => {
+      if (err) new Notice(`无法用 ${app.name} 打开目录`);
+      else new Notice(`已用 ${app.name} 打开目录`);
+    });
   }
 
   // 在 Finder 中显示应用
