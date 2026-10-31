@@ -1,0 +1,9 @@
+{
+  "id": "mac-app-launcher",
+  "name": "Mac App Launcher",
+  "version": "1.4.0",
+  "minAppVersion": "1.13.0",
+  "description": "A macOS app workspace for Obsidian with pinned apps, drag sorting, category navigation, editable app profiles, native icons, and a localhost Agent API.",
+  "author": "OpenAI",
+  "isDesktopOnly": true
+}
