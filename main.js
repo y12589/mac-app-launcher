@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.15.0", changes: ["场景一键导出 Canvas 工作流：应用节点可点击启动，连线串联执行顺序"] },
   { version: "1.14.0", changes: ["一键生成 Bases 数据库视图，应用资料卡接入 Obsidian 原生数据库"] },
   { version: "1.13.0", changes: ["开放 window.MacAppLauncher API，QuickAdd / Templater 可直接启动应用与场景", "配置导入导出：应用、场景、分类一键跨 Vault 迁移"] },
   { version: "1.12.0", changes: ["编辑器类应用可直接打开当前 Vault，终端类应用可进入当前笔记目录"] },
@@ -1182,6 +1183,8 @@ class MacAppLauncherView extends ItemView {
       launch.addEventListener("click", () => this.plugin.launchScene(scene));
       const close = row.createEl("button", { text: "关闭", cls: "mal-button" });
       close.addEventListener("click", () => this.plugin.closeScene(scene));
+      const canvasBtn = row.createEl("button", { text: "画布", cls: "mal-button" });
+      canvasBtn.addEventListener("click", () => this.plugin.exportSceneCanvas(scene));
       const del = row.createEl("button", { text: "删除", cls: "mal-button mal-button-danger" });
       del.addEventListener("click", async () => {
         await this.plugin.removeScene(scene.id);
@@ -3462,6 +3465,56 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       if (i < apps.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
     }
     new Notice(`场景「${scene.name}」已启动 ${apps.length} 个应用`);
+  }
+
+  // ---- Canvas 工作流：把场景导出为可点击启动的画布 ----
+  async exportSceneCanvas(scene) {
+    const apps = scene.appIds
+      .map(id => this.settings.apps.find(a => a.id === id))
+      .filter(Boolean);
+    if (!apps.length) {
+      new Notice(`场景「${scene.name}」里没有应用`);
+      return;
+    }
+    const nodes = [{
+      id: "scene-title",
+      type: "text",
+      text: `# 🎬 ${scene.name}\n共 ${apps.length} 个应用，点击卡片即可启动`,
+      x: 0, y: -170, width: 420, height: 130
+    }];
+    for (let i = 0; i < apps.length; i++) {
+      nodes.push({
+        id: `app-${apps[i].id}`,
+        type: "text",
+        text: `\`\`\`app-launcher\napp: ${apps[i].name}\n\`\`\``,
+        x: i * 300, y: 0, width: 250, height: 190
+      });
+    }
+    const edges = [];
+    for (let i = 0; i < apps.length - 1; i++) {
+      edges.push({
+        id: `edge-${i}`,
+        fromNode: `app-${apps[i].id}`, fromSide: "right",
+        toNode: `app-${apps[i + 1].id}`, toSide: "left"
+      });
+    }
+    const folder = "工作流";
+    const name = String(scene.name).replace(/[\\/:*?"<>|]/g, "-");
+    const filePath = `${folder}/${name}.canvas`;
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder);
+    }
+    const existing = this.app.vault.getAbstractFileByPath(filePath);
+    let file = existing;
+    const content = JSON.stringify({ nodes, edges }, null, 2);
+    if (existing && existing instanceof TFile) {
+      await this.app.vault.modify(existing, content);
+    } else {
+      file = await this.app.vault.create(filePath, content);
+    }
+    new Notice(`已生成工作流画布：${name}.canvas`);
+    await this.app.workspace.getLeaf(false).openFile(file);
+    return file;
   }
 
   // 读取应用的 CFBundleIdentifier（结果缓存在 app.bundleId，避免重复读 plist）
