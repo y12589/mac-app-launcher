@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.11.0", changes: ["启动日志可自动写入每日笔记（默认关闭，设置页开启）"] },
   { version: "1.10.0", changes: ["应用知识库：一键为应用创建资料卡笔记，详情弹窗展示反向链接"] },
   { version: "1.9.0", changes: ["Frontmatter 应用绑定：笔记用 apps / app-scene 声明工作环境", "文件列表右键菜单：按文件类型推荐应用打开、启动绑定场景"] },
   { version: "1.8.0", changes: ["当前笔记智能推荐相关应用", "笔记内嵌 app-launcher 启动卡片", "场景注册到命令面板，一键启动"] },
@@ -1644,6 +1645,17 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("记录启动日志到每日笔记")
+      .setDesc("每次通过本插件启动应用时，在当天日记的「应用使用记录」小节追加一行。默认关闭。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.logToDailyNote === true);
+        toggle.onChange(async value => {
+          this.plugin.settings.logToDailyNote = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
     // ── Agent API ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "Agent API" });
 
@@ -1838,7 +1850,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
       latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : "",
       downloadMirror: typeof loaded.downloadMirror === "string" ? loaded.downloadMirror : "",
-      autoLaunchSceneId: typeof loaded.autoLaunchSceneId === "string" ? loaded.autoLaunchSceneId : ""
+      autoLaunchSceneId: typeof loaded.autoLaunchSceneId === "string" ? loaded.autoLaunchSceneId : "",
+      logToDailyNote: loaded.logToDailyNote === true
     };
     this.scanning = false;
     this.scanCancelled = false;
@@ -2788,11 +2801,49 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           app.launchCount = (app.launchCount || 0) + 1;
           app.lastLaunchedAt = Date.now();
           this.saveSettings();
+          this.logLaunchToDaily(app).catch(err => console.warn("[Mac App Launcher] 写入每日笔记失败", err));
           if (!silent) new Notice(`已请求启动：${app.name}`);
           resolve({ ok: true });
         }
       });
     });
+  }
+
+  // ---- 每日笔记：记录启动日志（默认关闭）----
+  async logLaunchToDaily(app) {
+    if (!this.settings.logToDailyNote) return;
+    const now = new Date();
+    // 尊重 Daily Notes 核心插件的目录与文件名格式配置
+    let folder = "";
+    let format = "YYYY-MM-DD";
+    try {
+      const dn = this.app.internalPlugins && this.app.internalPlugins.plugins &&
+        this.app.internalPlugins.plugins["daily-notes"];
+      if (dn && dn.enabled && dn.instance && dn.instance.options) {
+        folder = dn.instance.options.folder || "";
+        format = dn.instance.options.format || "YYYY-MM-DD";
+      }
+    } catch (e) { /* 配置读取失败时用默认值 */ }
+    const filename = window.moment ? window.moment(now).format(format) : now.toISOString().slice(0, 10);
+    const notePath = `${folder ? folder + "/" : ""}${filename}.md`;
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const heading = "## 应用使用记录";
+    const line = `- ${time} 启动 ${app.name}`;
+    let file = this.app.vault.getAbstractFileByPath(notePath);
+    if (!file || !(file instanceof TFile)) {
+      if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+        await this.app.vault.createFolder(folder);
+      }
+      await this.app.vault.create(notePath, `${heading}\n\n${line}\n`);
+      return;
+    }
+    const content = await this.app.vault.read(file);
+    if (content.includes(heading)) {
+      const headingEnd = content.indexOf("\n", content.indexOf(heading)) + 1;
+      await this.app.vault.modify(file, content.slice(0, headingEnd) + `${line}\n` + content.slice(headingEnd));
+    } else {
+      await this.app.vault.modify(file, content.replace(/\s*$/, "") + `\n\n${heading}\n\n${line}\n`);
+    }
   }
 
   // ---- 当前笔记推荐：根据笔记名、父文件夹与标签匹配应用 ----
