@@ -78,6 +78,32 @@ curl -s -X POST "http://127.0.0.1:43171/v1/launch-batch" \
 
 除健康检查外均需要 `Authorization: Bearer YOUR_TOKEN`。
 
+## 插件内公开 API（1.13.0+）
+
+Obsidian 内运行的脚本（QuickAdd 宏、Templater 用户脚本、其他插件）可以直接调用挂在 `window` 上的公开 API，无需 HTTP 与令牌：
+
+```js
+// 模糊启动应用（精确名 → 子串 → 拼音/模糊匹配），返回 Promise<{ok}>
+await MacAppLauncher.launch("VS Code");
+
+// 启动场景
+await MacAppLauncher.launchScene("写作模式");
+
+// 列出已勾选应用
+MacAppLauncher.apps(); // [{ name, category }, ...]
+```
+
+QuickAdd 宏示例——「新建项目 → 打开项目笔记 → 启动项目场景」：
+
+```js
+module.exports = async ({ app }) => {
+  await app.workspace.openLinkText("项目首页.md", "", true);
+  await MacAppLauncher.launchScene("项目模式");
+};
+```
+
+注意：该 API 只在 Obsidian 进程内有效，插件卸载或禁用后自动移除；与 HTTP API 一样只能启动已勾选的应用。
+
 ## 安全边界
 
 - API 只监听 `127.0.0.1`，不是局域网服务。
