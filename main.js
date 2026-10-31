@@ -1,4 +1,4 @@
-const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu } = require("obsidian");
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu, Modal } = require("obsidian");
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -8,6 +8,16 @@ const http = require("http");
 const https = require("https");
 
 const VIEW_TYPE = "mac-app-launcher-view";
+
+// 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
+const ABOUT_CHANGELOG = [
+  { version: "1.7.5", changes: ["关闭场景改为 bundle ID 匹配，中文名应用也能准确退出"] },
+  { version: "1.7.4", changes: ["更新下载失败自动重试，支持自定义加速镜像", "启动 Obsidian 可自动拉起指定场景", "场景错峰启动，新增一键关闭场景"] },
+  { version: "1.7.3", changes: ["作者名改为阎大大，插件介绍改为中文"] },
+  { version: "1.7.2", changes: ["设置页 UI 重构：版本徽章、服务状态行、分组优化"] },
+  { version: "1.7.1", changes: ["应用详情改回居中弹窗，设置页新增关于区"] },
+  { version: "1.7.0", changes: ["自定义分类与批量分类、归类学习", "拼音搜索（首字母/全拼）", "场景模式、最近启动、单应用快捷键", "Agent API 增强：搜索、模糊启动、批量启动"] }
+];
 const DEFAULT_CATEGORY_META = [
   { name: "AI助手", icon: "🤖" }, { name: "AI智能体", icon: "🦾" },
   { name: "办公工具", icon: "📝" }, { name: "开发工具", icon: "🛠" },
@@ -1429,6 +1439,52 @@ class QuickLaunchModal {
   }
 }
 
+// ---- 关于弹窗：作者、版本、内置更新日志 ----
+class AboutModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-about-modal");
+
+    const head = contentEl.createDiv({ cls: "mal-about-head" });
+    head.createEl("h2", { text: "Mac App Launcher" });
+    head.createSpan({ cls: "mal-settings-version", text: `v${this.plugin.manifest.version}` });
+
+    contentEl.createEl("p", { cls: "mal-about-author", text: "作者：阎大大" });
+    contentEl.createEl("p", { cls: "mal-about-desc", text: this.plugin.manifest.description || "" });
+
+    const btns = contentEl.createDiv({ cls: "mal-about-btns" });
+    const links = [
+      ["GitHub 仓库", "https://github.com/y12589/mac-app-launcher"],
+      ["完整更新日志", "https://github.com/y12589/mac-app-launcher/blob/YDD/CHANGELOG.md"],
+      ["提交 Issue", "https://github.com/y12589/mac-app-launcher/issues"]
+    ];
+    for (const [label, url] of links) {
+      const btn = btns.createEl("button", { text: label, cls: "mal-button" });
+      btn.addEventListener("click", () => window.open(url, "_blank"));
+    }
+
+    contentEl.createEl("h3", { text: "更新日志" });
+    const log = contentEl.createDiv({ cls: "mal-about-log" });
+    for (const entry of ABOUT_CHANGELOG) {
+      const item = log.createDiv({ cls: "mal-about-log-entry" });
+      item.createEl("div", { cls: "mal-about-log-version", text: entry.version });
+      const ul = item.createEl("ul");
+      for (const line of entry.changes) {
+        ul.createEl("li", { text: line });
+      }
+    }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class MacAppLauncherSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -1602,24 +1658,13 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
     containerEl.createDiv({ cls: "mal-settings-group", text: "关于" });
 
     new Setting(containerEl)
-      .setName("Mac App Launcher")
-      .setDesc("作者 阎大大 · 问题与建议欢迎到 GitHub 反馈")
+      .setName("关于 Mac App Launcher")
+      .setDesc("作者 阎大大 · 查看版本信息与更新日志")
       .addButton(button => {
-        button.setButtonText("GitHub 仓库");
+        button.setButtonText("打开关于页");
+        button.setCta();
         button.onClick(() => {
-          window.open("https://github.com/y12589/mac-app-launcher", "_blank");
-        });
-      })
-      .addButton(button => {
-        button.setButtonText("更新日志");
-        button.onClick(() => {
-          window.open("https://github.com/y12589/mac-app-launcher/blob/YDD/CHANGELOG.md", "_blank");
-        });
-      })
-      .addButton(button => {
-        button.setButtonText("提交 Issue");
-        button.onClick(() => {
-          window.open("https://github.com/y12589/mac-app-launcher/issues", "_blank");
+          new AboutModal(this.app, this.plugin).open();
         });
       });
   }
