@@ -1,4 +1,4 @@
-const { Plugin, ItemView, Notice, PluginSettingTab, Setting } = require("obsidian");
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu } = require("obsidian");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -388,6 +388,16 @@ class MacAppLauncherView extends ItemView {
         this.render();
       });
     } else {
+      const toggleView = controls.createEl("button", {
+        text: this.plugin.settings.viewMode === "list" ? "▦ 网格" : "☰ 列表",
+        cls: "mal-button",
+        attr: { title: "切换网格 / 列表视图" }
+      });
+      toggleView.addEventListener("click", async () => {
+        this.plugin.settings.viewMode = this.plugin.settings.viewMode === "list" ? "grid" : "list";
+        await this.plugin.saveSettings();
+        this.render();
+      });
       const manage = controls.createEl("button", { text: "管理应用", cls: "mal-primary" });
       manage.addEventListener("click", () => {
         this.mode = "manage";
@@ -527,7 +537,7 @@ class MacAppLauncherView extends ItemView {
     const isPinnedStrip = apps.length > 0 && apps.every(app => app.pinned);
     const section = body.createDiv({ cls: isPinnedStrip ? "mal-pinned-top" : "mal-section" });
     if (title) section.createEl("h3", { text: title, cls: "mal-category" });
-    const grid = section.createDiv({ cls: "mal-grid" });
+    const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
     const sorted = [...apps].sort((a, b) => {
       const aKey = a.pinned ? (a.pinnedOrder ?? a.order ?? 0) : (a.order ?? 0);
       const bKey = b.pinned ? (b.pinnedOrder ?? b.order ?? 0) : (b.order ?? 0);
@@ -567,6 +577,47 @@ class MacAppLauncherView extends ItemView {
           this.editingDetail = false;
           this.render();
         }
+      });
+
+      card.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const menu = new Menu();
+        menu.addItem(item => item
+          .setTitle(`打开 ${app.name}`)
+          .setIcon("play")
+          .onClick(() => this.plugin.launchApp(app)));
+        menu.addItem(item => item
+          .setTitle(app.pinned ? "取消置顶" : "置顶应用")
+          .setIcon("pin")
+          .onClick(async () => {
+            await this.plugin.togglePin(app);
+            this.render();
+          }));
+        menu.addSeparator();
+        menu.addItem(item => item
+          .setTitle("在 Finder 中显示")
+          .setIcon("folder-open")
+          .onClick(() => this.plugin.revealInFinder(app)));
+        menu.addItem(item => item
+          .setTitle("复制应用路径")
+          .setIcon("copy")
+          .onClick(() => {
+            navigator.clipboard.writeText(app.path || "");
+            new Notice("已复制应用路径");
+          }));
+        if (app.custom) {
+          menu.addSeparator();
+          menu.addItem(item => item
+            .setTitle("移除应用")
+            .setIcon("trash")
+            .onClick(async () => {
+              await this.plugin.removeCustomApp(app);
+              new Notice(`已移除：${app.name}`);
+              this.render();
+            }));
+        }
+        menu.showAtMouseEvent(event);
       });
 
       card.addEventListener("dragstart", event => {
@@ -619,6 +670,14 @@ class MacAppLauncherView extends ItemView {
     const names = identity.createDiv({ cls: "mal-detail-names" });
     names.createEl("h3", { text: app.name });
     names.createEl("div", { text: `${app.category || "未分类"} · ${app.path}`, cls: "mal-detail-meta" });
+    const launches = app.launchCount || 0;
+    const lastUsed = app.lastLaunchedAt
+      ? new Date(app.lastLaunchedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "从未";
+    names.createEl("div", {
+      text: `启动 ${launches} 次 · 最近使用：${lastUsed}${app.custom ? " · 手动添加" : ""}`,
+      cls: "mal-detail-meta mal-detail-stats"
+    });
 
     const actions = top.createDiv({ cls: "mal-detail-actions" });
     const pin = actions.createEl("button", {
@@ -629,6 +688,17 @@ class MacAppLauncherView extends ItemView {
       await this.plugin.togglePin(app);
       this.render();
     });
+    const reveal = actions.createEl("button", { text: "在 Finder 显示", cls: "mal-button" });
+    reveal.addEventListener("click", () => this.plugin.revealInFinder(app));
+    if (app.custom) {
+      const remove = actions.createEl("button", { text: "移除", cls: "mal-button mal-button-danger" });
+      remove.addEventListener("click", async () => {
+        await this.plugin.removeCustomApp(app);
+        this.detailAppId = null;
+        new Notice(`已移除：${app.name}`);
+        this.render();
+      });
+    }
     const close = actions.createEl("button", { text: "✕", cls: "mal-button" });
     close.addEventListener("click", () => {
       this.detailAppId = null;
@@ -696,6 +766,7 @@ class MacAppLauncherView extends ItemView {
 
     const summary = body.createDiv({ cls: "mal-manage-summary" });
     this.updateManageSummary(summary);
+    this.renderAddCustomApp(body);
     this.renderAgentApiPanel(body);
 
     if (!this.plugin.settings.hasScanned && !apps.length) {
@@ -748,6 +819,41 @@ class MacAppLauncherView extends ItemView {
     }
   }
 
+  renderAddCustomApp(body) {
+    const panel = body.createDiv({ cls: "mal-add-custom" });
+    panel.createEl("h3", { text: "手动添加应用" });
+    panel.createEl("p", {
+      text: "添加扫描不到的应用（如 Parallels 虚拟机应用、自编译应用），支持 ~ 开头的路径。",
+      cls: "mal-add-custom-hint"
+    });
+    const row = panel.createDiv({ cls: "mal-add-custom-row" });
+    const pathInput = row.createEl("input", {
+      cls: "mal-category-input mal-add-path",
+      attr: { type: "text", placeholder: "应用路径，如 ~/Applications/MyApp.app", spellcheck: "false" }
+    });
+    const catInput = row.createEl("input", {
+      cls: "mal-category-input mal-add-category",
+      attr: { type: "text", placeholder: "分类（可选）" }
+    });
+    const btn = row.createEl("button", { text: "添加应用", cls: "mal-primary" });
+    btn.addEventListener("click", async () => {
+      btn.setAttr("disabled", "true");
+      try {
+        const result = await this.plugin.addCustomApp(pathInput.value, catInput.value);
+        if (result.ok) {
+          new Notice(`已添加：${result.app.name}`);
+          this.render();
+        } else {
+          new Notice(result.error, 6000);
+          btn.removeAttribute("disabled");
+        }
+      } catch (error) {
+        new Notice(`添加失败：${error.message || error}`, 6000);
+        btn.removeAttribute("disabled");
+      }
+    });
+  }
+
   renderAgentApiPanel(body) {
     const panel = body.createDiv({ cls: "mal-agent-panel" });
     const heading = panel.createDiv({ cls: "mal-agent-heading" });
@@ -775,17 +881,19 @@ class MacAppLauncherView extends ItemView {
       cls: "mal-agent-input",
       attr: { type: "text", readonly: "readonly", spellcheck: "false", "aria-label": "Agent API 访问令牌" }
     });
-    token.value = this.plugin.settings.agentToken || "";
+    token.value = this.plugin.sessionAgentToken || "（已安全存储，仅生成当次可见；需要新令牌请点击重置）";
 
     const actions = panel.createDiv({ cls: "mal-agent-actions" });
     const copy = actions.createEl("button", { text: "复制 Agent 接入说明", cls: "mal-primary" });
     copy.addEventListener("click", () => this.plugin.copyAgentInstructions());
     const rotate = actions.createEl("button", { text: "重置访问令牌", cls: "mal-button" });
     rotate.addEventListener("click", async () => {
-      this.plugin.settings.agentToken = crypto.randomBytes(32).toString("hex");
+      const fresh = crypto.randomBytes(32).toString("hex");
+      this.plugin.sessionAgentToken = fresh;
+      this.plugin.settings.agentTokenHash = crypto.createHash("sha256").update(fresh).digest("hex");
       await this.plugin.saveSettings();
       this.render();
-      new Notice("Agent API 访问令牌已重置，旧令牌立即失效。");
+      new Notice("Agent API 访问令牌已重置，旧令牌立即失效。新令牌仅本次会话可见，请立即复制保存。", 8000);
     });
 
     const note = panel.createEl("p", {
@@ -794,7 +902,7 @@ class MacAppLauncherView extends ItemView {
     });
     const sample = panel.createEl("pre", { cls: "mal-agent-sample" });
     sample.setText(
-      `查询应用：GET /v1/apps\n启动应用：POST /v1/launch\n请求头：Authorization: Bearer ${this.plugin.settings.agentToken || "<token>"}`
+      `查询应用：GET /v1/apps\n启动应用：POST /v1/launch\n请求头：Authorization: Bearer ${this.plugin.sessionAgentToken || "<token>"}`
     );
   }
 
@@ -900,6 +1008,19 @@ class QuickLaunchModal {
   updateResults() {
     const apps = this.plugin.settings.apps.filter(app => app.selected);
     const searched = fuzzySearchApps(apps, this.query);
+    if (this.query.trim()) {
+      // 有搜索词：相关度 + 使用频率加成（log 平滑，避免刷次数碾压相关度）
+      for (const item of searched) {
+        item.score += Math.log10(1 + (item.app.launchCount || 0)) * 0.5;
+      }
+      searched.sort((a, b) => b.score - a.score);
+    } else {
+      // 无搜索词：按使用频率降序，次数相同按名称
+      searched.sort((a, b) =>
+        (b.app.launchCount || 0) - (a.app.launchCount || 0) ||
+        a.app.name.localeCompare(b.app.name, "zh-Hans-CN")
+      );
+    }
     // 最多显示 12 个，避免列表过长
     this.results = searched.slice(0, 12).map(item => item.app);
     if (this.selectedIndex >= this.results.length) {
@@ -1124,16 +1245,18 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
       .setName("访问令牌")
       .setDesc("Agent 调用除健康检查外的接口时必须携带此令牌。重置后旧令牌立即失效。")
       .addText(text => {
-        text.setValue(this.plugin.settings.agentToken || "");
+        text.setValue(this.plugin.sessionAgentToken || "（已安全存储，仅生成当次可见）");
         text.inputEl.setAttribute("readonly", "readonly");
         text.inputEl.setAttribute("spellcheck", "false");
       })
       .addButton(button => {
         button.setButtonText("重置访问令牌");
         button.onClick(async () => {
-          this.plugin.settings.agentToken = crypto.randomBytes(32).toString("hex");
+          const fresh = crypto.randomBytes(32).toString("hex");
+          this.plugin.sessionAgentToken = fresh;
+          this.plugin.settings.agentTokenHash = crypto.createHash("sha256").update(fresh).digest("hex");
           await this.plugin.saveSettings();
-          new Notice("Agent API 访问令牌已重置，旧令牌立即失效。");
+          new Notice("Agent API 访问令牌已重置，旧令牌立即失效。新令牌仅本次会话可见，请立即复制保存。", 8000);
           this.display();
         });
       })
@@ -1180,14 +1303,25 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   async onload() {
     const loaded = await this.loadData() || {};
     const rawApps = Array.isArray(loaded.apps) ? loaded.apps : parseLegacyApps(loaded.appsText);
+    // token 迁移：明文 → sha256 哈希存储；明文仅在生成的当次会话内可见
+    const legacyToken = typeof loaded.agentToken === "string" && loaded.agentToken.length >= 32 ? loaded.agentToken : "";
+    let tokenHash = typeof loaded.agentTokenHash === "string" && loaded.agentTokenHash.length === 64 ? loaded.agentTokenHash : "";
+    this.sessionAgentToken = "";
+    if (!tokenHash && legacyToken) {
+      tokenHash = crypto.createHash("sha256").update(legacyToken).digest("hex");
+      this.sessionAgentToken = legacyToken; // 本会话仍可见，便于用户备份
+    }
+    if (!tokenHash) {
+      this.sessionAgentToken = crypto.randomBytes(32).toString("hex");
+      tokenHash = crypto.createHash("sha256").update(this.sessionAgentToken).digest("hex");
+    }
     this.settings = {
       apps: rawApps.map((app, index) => normalizeApp(app, index)),
       hasScanned: !!loaded.hasScanned,
       agentPort: Number.isInteger(Number(loaded.agentPort)) && Number(loaded.agentPort) > 0 ? Number(loaded.agentPort) : 43171,
-      agentToken: typeof loaded.agentToken === "string" && loaded.agentToken.length >= 32
-        ? loaded.agentToken
-        : crypto.randomBytes(32).toString("hex"),
+      agentTokenHash: tokenHash,
       agentApiEnabled: loaded.agentApiEnabled !== false,
+      viewMode: loaded.viewMode === "list" ? "list" : "grid",
       autoCheckUpdates: loaded.autoCheckUpdates !== false,
       lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
       latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : ""
@@ -1220,6 +1354,29 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       name: "快速启动应用",
       hotkeys: [{ modifiers: ["Mod", "Shift"], key: " " }],
       callback: () => this.quickLaunch.open()
+    });
+    // URL Scheme：obsidian://mac-app-launcher?app=名称或ID
+    this.registerObsidianProtocolHandler("mac-app-launcher", params => {
+      const query = (params.app || "").trim();
+      if (!query) {
+        this.quickLaunch.open();
+        return;
+      }
+      const apps = this.settings.apps.filter(app => app.selected);
+      const q = query.toLowerCase();
+      // 先精确匹配 ID / 名称，再退到子串，最后模糊
+      let target = apps.find(app => app.id === query) ||
+        apps.find(app => (app.name || "").toLowerCase() === q) ||
+        apps.find(app => (app.name || "").toLowerCase().includes(q));
+      if (!target) {
+        const ranked = fuzzySearchApps(apps, query);
+        target = ranked.length ? ranked[0].app : null;
+      }
+      if (target) {
+        this.launchApp(target);
+      } else {
+        new Notice(`Mac App Launcher：找不到应用「${query}」`, 6000);
+      }
     });
     await this.saveSettings();
     if (this.settings.agentApiEnabled) {
@@ -1389,6 +1546,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       const manifest = JSON.parse(downloaded["manifest.json"].toString("utf8"));
       if (manifest.id !== this.manifest.id) throw new Error("下载的 manifest id 不匹配，已中止更新");
       if (String(manifest.version) !== String(version)) throw new Error("下载的 manifest 版本与 Release 不一致，已中止更新");
+      if (this.compareVersions(manifest.version, this.manifest.version) <= 0) {
+        throw new Error("下载的版本不高于当前版本，疑似回退攻击，已中止更新");
+      }
       for (const file of files) {
         const target = path.join(dir, file);
         if (fs.existsSync(target)) fs.copyFileSync(target, `${target}.bak`);
@@ -1431,10 +1591,26 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   isValidAgentToken(req) {
     const header = String(req.headers.authorization || "");
     if (!header.startsWith("Bearer ")) return false;
-    const provided = Buffer.from(header.slice(7));
-    const expected = Buffer.from(this.settings.agentToken || "");
-    if (!expected.length || provided.length !== expected.length) return false;
+    const expected = Buffer.from(this.settings.agentTokenHash || "", "hex");
+    if (!expected.length) return false;
+    const provided = crypto.createHash("sha256").update(header.slice(7)).digest();
+    if (provided.length !== expected.length) return false;
     return crypto.timingSafeEqual(provided, expected);
+  }
+
+  // 简单限速：每来源 IP 每分钟 120 次，防本机误调用打爆
+  isRateLimited(req) {
+    const ip = req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    if (!this.rateLimiter) this.rateLimiter = new Map();
+    let bucket = this.rateLimiter.get(ip);
+    if (!bucket || now > bucket.resetAt) {
+      bucket = { count: 0, resetAt: now + 60000 };
+      this.rateLimiter.set(ip, bucket);
+    }
+    if (this.rateLimiter.size > 100) this.rateLimiter.clear();
+    bucket.count++;
+    return bucket.count > 120;
   }
 
   async readAgentBody(req) {
@@ -1465,6 +1641,10 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     // Health is intentionally minimal and does not disclose app names or token data.
     if (req.method === "GET" && route === "/v1/health") {
       return this.sendAgentJson(res, 200, { ok: true, service: "mac-app-launcher" });
+    }
+
+    if (this.isRateLimited(req)) {
+      return this.sendAgentJson(res, 429, { ok: false, error: "rate_limited", message: "Too many requests, please slow down." });
     }
 
     if (!this.isValidAgentToken(req)) {
@@ -1549,7 +1729,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   async copyAgentInstructions() {
     const baseUrl = `http://127.0.0.1:${this.settings.agentPort}`;
-    const token = this.settings.agentToken;
+    const token = this.sessionAgentToken;
+    if (!token) {
+      new Notice("令牌仅生成当次会话可见。请先点击「重置访问令牌」生成新令牌并立即复制。", 8000);
+      return;
+    }
     const instructions = [
       "Mac App Launcher 本机 Agent API",
       `Base URL: ${baseUrl}`,
@@ -1706,7 +1890,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
             description: old?.description || suggested.description,
             usage: old?.usage || suggested.usage,
             iconPath: old?.iconPath && fs.existsSync(old.iconPath) ? old.iconPath : "",
-            iconSource: info.iconSource || old?.iconSource || ""
+            iconSource: info.iconSource || old?.iconSource || "",
+            launchCount: old?.launchCount || 0,
+            lastLaunchedAt: old?.lastLaunchedAt || null
           }, results.length));
 
           completed++;
@@ -1726,7 +1912,12 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       }
 
       results.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
-      this.settings.apps = results;
+      // 保留手动添加的应用（扫描不到的，如 Parallels、自编译 .app）
+      const resultPaths = new Set(results.map(app => path.resolve(app.path || "")));
+      const customApps = previous.filter(app =>
+        app.custom && !resultPaths.has(path.resolve(app.path || ""))
+      );
+      this.settings.apps = [...results, ...customApps];
       this.settings.hasScanned = true;
       await this.saveSettings();
       this.scanStatus = `扫描完成：发现 ${results.length} 个应用`;
@@ -1918,10 +2109,66 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           if (!silent) new Notice(message, 7000);
           resolve({ ok: false, error: message });
         } else {
+          // 频率统计：记录启动次数与最近启动时间
+          app.launchCount = (app.launchCount || 0) + 1;
+          app.lastLaunchedAt = Date.now();
+          this.saveSettings();
           if (!silent) new Notice(`已请求启动：${app.name}`);
           resolve({ ok: true });
         }
       });
     });
+  }
+
+  // 在 Finder 中显示应用
+  revealInFinder(app) {
+    if (!app.path) return;
+    execFile("/usr/bin/open", ["-R", app.path], error => {
+      if (error) new Notice(`无法在 Finder 中显示：${app.name}`);
+    });
+  }
+
+  // 移除手动添加的应用
+  async removeCustomApp(app) {
+    if (!app.custom) return;
+    this.settings.apps = this.settings.apps.filter(item => item.id !== app.id);
+    await this.saveSettings();
+    this.refreshViews();
+  }
+
+  // 手动添加应用：支持任意路径的 .app（Parallels、自编译等扫描不到的应用）
+  async addCustomApp(appPath, category) {
+    const trimmed = (appPath || "").trim();
+    if (!trimmed) return { ok: false, error: "请输入应用路径" };
+    const resolved = path.resolve(trimmed.replace(/^~(?=\/|$)/, os.homedir()));
+    if (!resolved.toLowerCase().endsWith(".app")) {
+      return { ok: false, error: "路径必须以 .app 结尾" };
+    }
+    if (!fs.existsSync(path.join(resolved, "Contents", "Info.plist"))) {
+      return { ok: false, error: "该路径下找不到有效的应用包" };
+    }
+    if (this.settings.apps.some(app => path.resolve(app.path || "") === resolved)) {
+      return { ok: false, error: "该应用已在列表中" };
+    }
+    const info = await this.readAppInfo(resolved);
+    const app = normalizeApp({
+      id: appId(resolved),
+      name: info.name,
+      path: resolved,
+      selected: true,
+      category: (category || "").trim() || fallbackCategory(info.name, resolved),
+      pinned: false,
+      custom: true,
+      description: "",
+      usage: "",
+      iconPath: "",
+      iconSource: info.iconSource || "",
+      launchCount: 0,
+      lastLaunchedAt: null
+    }, this.settings.apps.length);
+    this.settings.apps.push(app);
+    await this.saveSettings();
+    this.refreshViews();
+    return { ok: true, app };
   }
 };
