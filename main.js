@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.10.0", changes: ["应用知识库：一键为应用创建资料卡笔记，详情弹窗展示反向链接"] },
   { version: "1.9.0", changes: ["Frontmatter 应用绑定：笔记用 apps / app-scene 声明工作环境", "文件列表右键菜单：按文件类型推荐应用打开、启动绑定场景"] },
   { version: "1.8.0", changes: ["当前笔记智能推荐相关应用", "笔记内嵌 app-launcher 启动卡片", "场景注册到命令面板，一键启动"] },
   { version: "1.7.6", changes: ["设置页新增关于弹窗，内置更新日志"] },
@@ -29,6 +30,9 @@ const DEFAULT_CATEGORY_META = [
   { name: "其他", icon: "📦" }, { name: "未分类", icon: "❓" }
 ];
 const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_META.map(c => c.name);
+
+// 应用资料卡笔记的存放目录
+const APP_NOTES_FOLDER = "应用资料";
 
 // 文件右键菜单：扩展名 → 推荐应用分类
 const EXT_CATEGORY_RULES = [
@@ -754,6 +758,10 @@ class MacAppLauncherView extends ItemView {
             navigator.clipboard.writeText(app.path || "");
             new Notice("已复制应用路径");
           }));
+        menu.addItem(item => item
+          .setTitle("打开 / 创建应用笔记")
+          .setIcon("file-text")
+          .onClick(() => this.plugin.openAppNote(app)));
         if (app.custom) {
           menu.addSeparator();
           menu.addItem(item => item
@@ -913,6 +921,34 @@ class MacAppLauncherView extends ItemView {
         this.editingDetail = true;
         this.render();
       });
+    }
+
+    // 应用笔记与关联知识
+    panel.createEl("div", { text: "应用笔记与关联知识", cls: "mal-detail-label" });
+    const noteRow = panel.createDiv({ cls: "mal-detail-note-row" });
+    const noteFile = this.plugin.getAppNoteFile(app);
+    const noteBtn = noteRow.createEl("button", {
+      text: noteFile ? "📝 打开应用笔记" : "📝 创建应用笔记",
+      cls: "mal-button"
+    });
+    noteBtn.addEventListener("click", async () => {
+      this.detailAppId = null;
+      await this.plugin.openAppNote(app);
+    });
+    if (noteFile) {
+      const backlinks = this.plugin.getAppBacklinks(noteFile);
+      if (backlinks.length) {
+        const list = panel.createDiv({ cls: "mal-backlinks" });
+        for (const f of backlinks.slice(0, 8)) {
+          const link = list.createEl("button", { text: f.basename, cls: "mal-backlink" });
+          link.addEventListener("click", () => {
+            this.detailAppId = null;
+            this.app.workspace.getLeaf(false).openFile(f);
+          });
+        }
+      } else {
+        panel.createEl("p", { text: "还没有笔记链接到这篇应用资料卡。", cls: "mal-detail-meta" });
+      }
     }
 
     const footer = panel.createDiv({ cls: "mal-detail-footer" });
@@ -2837,6 +2873,52 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         scene: this.settings.scenes.find(s => s.name === String(name)) || null
       }))
     };
+  }
+
+  // ---- 应用知识库：每个应用一篇资料卡笔记 ----
+  getAppNoteFile(app) {
+    const candidates = [];
+    if (app.notePath) candidates.push(app.notePath);
+    candidates.push(`${APP_NOTES_FOLDER}/${String(app.name).replace(/[\\/:*?"<>|]/g, "-")}.md`);
+    for (const p of candidates) {
+      const f = this.app.vault.getAbstractFileByPath(p);
+      if (f && f instanceof TFile) return f;
+    }
+    return null;
+  }
+
+  async openAppNote(app) {
+    let file = this.getAppNoteFile(app);
+    if (!file) {
+      const name = String(app.name).replace(/[\\/:*?"<>|]/g, "-");
+      const notePath = `${APP_NOTES_FOLDER}/${name}.md`;
+      if (!this.app.vault.getAbstractFileByPath(APP_NOTES_FOLDER)) {
+        await this.app.vault.createFolder(APP_NOTES_FOLDER);
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const content = `---\ntype: application\napp-name: ${app.name}\ncategory: ${app.category || "未分类"}\nstatus: installed\ncreated: ${today}\n---\n\n\`\`\`app-launcher\napp: ${app.name}\n\`\`\`\n\n## 安装与配置\n\n\n## 使用技巧\n\n\n## 常见故障\n\n\n## 相关笔记\n\n`;
+      file = await this.app.vault.create(notePath, content);
+      app.notePath = notePath;
+      await this.saveSettings();
+      new Notice(`已创建应用笔记：${name}`);
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
+    return file;
+  }
+
+  // 反向链接：哪些笔记引用了这个应用的资料卡
+  getAppBacklinks(noteFile) {
+    const resolved = this.app.metadataCache.resolvedLinks || {};
+    const out = [];
+    for (const [source, links] of Object.entries(resolved)) {
+      if (source === noteFile.path) continue;
+      if (links && links[noteFile.path]) {
+        const f = this.app.vault.getAbstractFileByPath(source);
+        if (f && f instanceof TFile) out.push(f);
+      }
+    }
+    out.sort((a, b) => a.basename.localeCompare(b.basename, "zh-Hans-CN"));
+    return out;
   }
 
   // ---- 文件列表右键菜单：按文件类型推荐应用打开 / 启动绑定场景 ----

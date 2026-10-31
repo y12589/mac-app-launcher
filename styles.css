@@ -186,3 +186,9 @@
 /* 本篇笔记绑定区 */
 .mal-bind-bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .mal-app-card.is-missing{opacity:.55}
+
+/* 应用笔记与反向链接 */
+.mal-detail-note-row{display:flex;gap:8px;align-items:center;margin:0 0 8px}
+.mal-backlinks{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+.mal-backlink{border:1px solid var(--background-modifier-border);border-radius:999px;padding:4px 10px;background:var(--background-secondary);color:var(--text-muted);font-size:var(--font-smaller)}
+.mal-backlink:hover{border-color:var(--interactive-accent);color:var(--text-normal)}
