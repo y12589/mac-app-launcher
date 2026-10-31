@@ -86,7 +86,7 @@
 .mal-cat-row{display:flex;align-items:center;gap:8px;padding:4px 0}
 .mal-cat-icon{width:44px;text-align:center;padding:4px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary)}
 .mal-cat-name{flex:1;padding:4px 8px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary)}
-.mal-cat-count{font-size:var(--font-smaller);color:var(--text-faint);min-width:60px;text-align:right}
+.mal-cat-count{font-size:var(--font-smaller);color:var(--text-faint);min-width:60px;max-width:180px;text-align:right}
 .mal-cat-move{padding:2px 8px}
 .mal-cat-add{margin-top:8px;padding-top:10px;border-top:1px solid var(--background-modifier-border)}
 .mal-scene-icon{width:44px;text-align:center}
@@ -195,3 +195,18 @@
 
 /* 导入配置弹窗 */
 .mal-import-textarea{width:100%;font-family:var(--font-monospace);font-size:var(--font-smaller);resize:vertical;margin:8px 0 10px}
+
+/* 场景步骤编辑器与搜索选择器（1.18） */
+.mal-steps-modal .mal-steps-list{display:flex;flex-direction:column;gap:6px;margin:8px 0 14px;max-height:50vh;overflow:auto}
+.mal-step-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--background-modifier-border);border-radius:9px;background:var(--background-secondary)}
+.mal-step-icon{width:24px;text-align:center;flex:0 0 24px}
+.mal-step-info{flex:1;min-width:0;display:flex;flex-direction:column}
+.mal-step-label{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mal-step-sub{font-size:var(--font-smaller);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mal-steps-add{display:flex;gap:8px;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--background-modifier-border)}
+.mal-picker .mal-picker-input{width:100%;padding:8px 10px;margin:4px 0 10px;border:1px solid var(--background-modifier-border);border-radius:8px;background:var(--background-primary)}
+.mal-picker-list{display:flex;flex-direction:column;gap:2px;max-height:55vh;overflow:auto}
+.mal-picker-row{display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.mal-picker-row:hover{background:var(--background-modifier-hover)}
+.mal-picker-label{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mal-picker-hint{font-size:var(--font-smaller);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:right}

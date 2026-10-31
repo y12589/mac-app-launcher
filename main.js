@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.18.0", changes: ["场景升级为混合工作流：应用、笔记、文件夹、Obsidian 命令四种步骤有序执行", "命令白名单：只能执行亲手挑进场景的已注册命令，失效自动跳过并提示"] },
   { version: "1.17.1", changes: ["文档补齐：README 与 Agent 接入说明覆盖 1.8–1.17 全部新功能"] },
   { version: "1.17.0", changes: ["Canvas 工作流自动执行：按连线顺序启动应用、打开笔记，循环连线自动拦截"] },
   { version: "1.16.0", changes: ["场景启动感知运行状态：已在运行的应用自动跳过，不重复拉起"] },
@@ -193,6 +194,213 @@ function fuzzySearchApps(apps, query) {
   }
   results.sort((a, b) => b.score - a.score);
   return results;
+}
+
+// ---- 场景步骤：应用 / 笔记 / 文件夹 / Obsidian 命令 ----
+const SCENE_STEP_ICONS = { app: "📱", note: "📄", folder: "📁", command: "⌘" };
+
+function sanitizeSceneSteps(steps) {
+  const out = [];
+  for (const step of steps) {
+    if (!step || typeof step !== "object") continue;
+    if (step.type === "app" && step.id) out.push({ type: "app", id: String(step.id) });
+    else if (step.type === "note" && step.path) out.push({ type: "note", path: String(step.path) });
+    else if (step.type === "folder" && step.path) out.push({ type: "folder", path: String(step.path) });
+    else if (step.type === "command" && step.id) out.push({ type: "command", id: String(step.id), name: String(step.name || step.id) });
+  }
+  return out;
+}
+
+// 场景 steps 不存在时从旧字段 appIds 迁移（旧字段保留只读，保证降级不丢数据）
+function ensureSceneSteps(scene) {
+  if (Array.isArray(scene.steps)) scene.steps = sanitizeSceneSteps(scene.steps);
+  else scene.steps = (Array.isArray(scene.appIds) ? scene.appIds : []).map(id => ({ type: "app", id: String(id) }));
+  return scene.steps;
+}
+
+function sceneStepsSummary(plugin, scene) {
+  const steps = ensureSceneSteps(scene);
+  const counts = { app: 0, note: 0, folder: 0, command: 0 };
+  for (const step of steps) if (counts[step.type] !== undefined) counts[step.type]++;
+  const parts = [];
+  if (counts.app) parts.push(`${counts.app} 应用`);
+  if (counts.note) parts.push(`${counts.note} 笔记`);
+  if (counts.folder) parts.push(`${counts.folder} 文件夹`);
+  if (counts.command) parts.push(`${counts.command} 命令`);
+  return parts.length ? parts.join(" · ") : "空场景";
+}
+
+// 通用搜索选择器：输入过滤、点击或回车选中
+class MalPickerModal extends Modal {
+  constructor(app, options) {
+    super(app);
+    this.pickerTitle = options.title || "选择";
+    this.placeholder = options.placeholder || "输入关键词过滤";
+    this.items = options.items || [];
+    this.onPick = options.onPick || (() => {});
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-picker");
+    contentEl.createEl("h3", { text: this.pickerTitle });
+    const input = contentEl.createEl("input", { cls: "mal-picker-input", attr: { type: "text", placeholder: this.placeholder } });
+    const list = contentEl.createDiv({ cls: "mal-picker-list" });
+    const renderList = query => {
+      list.empty();
+      const q = query.trim().toLowerCase();
+      const matched = this.items
+        .filter(it => !q || it.label.toLowerCase().includes(q) || String(it.hint || "").toLowerCase().includes(q))
+        .slice(0, 30);
+      if (!matched.length) {
+        list.createEl("p", { text: "没有匹配项", cls: "mal-muted" });
+        return;
+      }
+      for (const it of matched) {
+        const row = list.createDiv({ cls: "mal-picker-row" });
+        row.createEl("span", { text: it.label, cls: "mal-picker-label" });
+        if (it.hint) row.createEl("span", { text: it.hint, cls: "mal-picker-hint" });
+        row.addEventListener("click", () => {
+          this.close();
+          this.onPick(it);
+        });
+      }
+    };
+    input.addEventListener("input", () => renderList(input.value));
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        const first = list.querySelector(".mal-picker-row");
+        if (first) first.click();
+      }
+    });
+    renderList("");
+    setTimeout(() => input.focus(), 50);
+  }
+}
+
+// 场景步骤编辑器：排序、删除、添加四种步骤
+class SceneStepsModal extends Modal {
+  constructor(app, plugin, scene) {
+    super(app);
+    this.plugin = plugin;
+    this.scene = scene;
+  }
+
+  onOpen() {
+    this.renderBody();
+  }
+
+  stepLabel(step) {
+    if (step.type === "app") {
+      const app = this.plugin.settings.apps.find(a => a.id === step.id);
+      return app ? app.name : "（已移除的应用）";
+    }
+    if (step.type === "note") return String(step.path).split("/").pop().replace(/\.md$/i, "");
+    if (step.type === "folder") return String(step.path).split("/").pop() || step.path;
+    return step.name || step.id;
+  }
+
+  stepSub(step) {
+    if (step.type === "app") {
+      const app = this.plugin.settings.apps.find(a => a.id === step.id);
+      return app ? app.category || "" : "";
+    }
+    if (step.type === "note") return step.path;
+    if (step.type === "folder") return `${step.path} · 在 Finder 打开`;
+    return step.id;
+  }
+
+  async persist() {
+    await this.plugin.saveSettings();
+    this.plugin.refreshViews();
+    this.renderBody();
+  }
+
+  renderBody() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("mal-steps-modal");
+    contentEl.createEl("h3", { text: `场景步骤：${this.scene.name}` });
+    contentEl.createEl("p", {
+      text: "按从上到下的顺序执行：应用错峰启动（已运行的跳过），笔记直接打开，命令逐项执行。",
+      cls: "mal-add-custom-hint"
+    });
+    const steps = ensureSceneSteps(this.scene);
+    const list = contentEl.createDiv({ cls: "mal-steps-list" });
+    steps.forEach((step, index) => {
+      const row = list.createDiv({ cls: "mal-step-row" });
+      row.createEl("span", { text: SCENE_STEP_ICONS[step.type] || "•", cls: "mal-step-icon" });
+      const info = row.createDiv({ cls: "mal-step-info" });
+      info.createEl("span", { text: this.stepLabel(step), cls: "mal-step-label" });
+      const sub = this.stepSub(step);
+      if (sub) info.createEl("span", { text: sub, cls: "mal-step-sub" });
+      const up = row.createEl("button", { text: "↑", cls: "mal-button mal-cat-move" });
+      up.disabled = index === 0;
+      up.addEventListener("click", async () => {
+        [steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
+        await this.persist();
+      });
+      const down = row.createEl("button", { text: "↓", cls: "mal-button mal-cat-move" });
+      down.disabled = index === steps.length - 1;
+      down.addEventListener("click", async () => {
+        [steps[index], steps[index + 1]] = [steps[index + 1], steps[index]];
+        await this.persist();
+      });
+      const del = row.createEl("button", { text: "✕", cls: "mal-button mal-cat-move mal-button-danger" });
+      del.addEventListener("click", async () => {
+        steps.splice(index, 1);
+        await this.persist();
+      });
+    });
+    if (!steps.length) list.createEl("p", { text: "还没有步骤，点击下方按钮添加。", cls: "mal-empty" });
+
+    const add = contentEl.createDiv({ cls: "mal-steps-add" });
+    const appBtn = add.createEl("button", { text: "＋ 应用", cls: "mal-button" });
+    appBtn.addEventListener("click", () => {
+      const items = this.plugin.settings.apps.filter(a => a.selected !== false)
+        .map(a => ({ label: a.name, hint: a.category || "", value: { type: "app", id: a.id } }));
+      new MalPickerModal(this.app, {
+        title: "添加应用步骤",
+        placeholder: "搜索已勾选的应用…",
+        items,
+        onPick: async it => { steps.push(it.value); await this.persist(); }
+      }).open();
+    });
+    const noteBtn = add.createEl("button", { text: "＋ 笔记", cls: "mal-button" });
+    noteBtn.addEventListener("click", () => {
+      const items = this.app.vault.getMarkdownFiles()
+        .map(f => ({ label: f.basename, hint: f.path, value: { type: "note", path: f.path } }));
+      new MalPickerModal(this.app, {
+        title: "添加笔记步骤",
+        placeholder: "搜索库内笔记…",
+        items,
+        onPick: async it => { steps.push(it.value); await this.persist(); }
+      }).open();
+    });
+    const folderBtn = add.createEl("button", { text: "＋ 文件夹", cls: "mal-button" });
+    folderBtn.addEventListener("click", () => {
+      const folders = this.app.vault.getAllFolders ? this.app.vault.getAllFolders() : [];
+      const items = folders.filter(f => f.path !== "/")
+        .map(f => ({ label: f.name, hint: f.path, value: { type: "folder", path: f.path } }));
+      new MalPickerModal(this.app, {
+        title: "添加文件夹步骤",
+        placeholder: "搜索库内文件夹…",
+        items,
+        onPick: async it => { steps.push(it.value); await this.persist(); }
+      }).open();
+    });
+    const cmdBtn = add.createEl("button", { text: "＋ Obsidian 命令", cls: "mal-button mal-primary" });
+    cmdBtn.addEventListener("click", () => {
+      const commands = this.app.commands.listCommands ? this.app.commands.listCommands() : [];
+      const items = commands.map(c => ({ label: c.name, hint: c.id, value: { type: "command", id: c.id, name: c.name } }));
+      new MalPickerModal(this.app, {
+        title: "添加 Obsidian 命令步骤",
+        placeholder: "搜索命令（含其他插件的命令）…",
+        items,
+        onPick: async it => { steps.push(it.value); await this.persist(); }
+      }).open();
+    });
+  }
 }
 
 // 拼音转换助手脚本（Swift CFStringTransform），首次使用时编译为插件目录下的 pinyin-helper
@@ -1174,14 +1382,16 @@ class MacAppLauncherView extends ItemView {
     const panel = body.createDiv({ cls: "mal-cat-manager" });
     panel.createEl("h3", { text: "场景模式" });
     panel.createEl("p", {
-      text: "场景可一键启动一组应用。先在下方列表勾选应用，再回到这里创建；快速启动面板（Cmd+Shift+Space）可搜到场景。",
+      text: "场景可一键执行一串步骤：启动应用、打开笔记/文件夹、执行 Obsidian 命令。先用勾选的应用创建，再点「步骤」补充其他步骤；快速启动面板（Cmd+Shift+Space）可搜到场景。",
       cls: "mal-add-custom-hint"
     });
     for (const scene of this.plugin.settings.scenes) {
       const row = panel.createDiv({ cls: "mal-cat-row" });
       row.createEl("span", { text: "🎬", cls: "mal-scene-icon" });
       row.createEl("span", { text: scene.name, cls: "mal-scene-name" });
-      row.createEl("span", { text: `${scene.appIds.length} 个应用`, cls: "mal-cat-count" });
+      row.createEl("span", { text: sceneStepsSummary(this.plugin, scene), cls: "mal-cat-count" });
+      const stepsBtn = row.createEl("button", { text: "步骤", cls: "mal-button" });
+      stepsBtn.addEventListener("click", () => new SceneStepsModal(this.app, this.plugin, scene).open());
       const launch = row.createEl("button", { text: "启动", cls: "mal-primary" });
       launch.addEventListener("click", () => this.plugin.launchScene(scene));
       const close = row.createEl("button", { text: "关闭", cls: "mal-button" });
@@ -1420,7 +1630,7 @@ class QuickLaunchModal {
       const pseudoScenes = this.plugin.settings.scenes.map(s => ({
         id: `scene-${s.id}`,
         name: s.name,
-        category: `场景 · ${s.appIds.length} 个应用`,
+        category: `场景 · ${sceneStepsSummary(this.plugin, s)}`,
         isScene: true,
         scene: s,
         launchCount: 0,
@@ -1934,11 +2144,16 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       categoryRules: loaded.categoryRules && typeof loaded.categoryRules === "object" && !Array.isArray(loaded.categoryRules)
         ? loaded.categoryRules : {},
       scenes: Array.isArray(loaded.scenes)
-        ? loaded.scenes.filter(s => s && s.name).map(s => ({
-            id: String(s.id || crypto.randomBytes(6).toString("hex")),
-            name: String(s.name),
-            appIds: Array.isArray(s.appIds) ? s.appIds : []
-          }))
+        ? loaded.scenes.filter(s => s && s.name).map(s => {
+            const scene = {
+              id: String(s.id || crypto.randomBytes(6).toString("hex")),
+              name: String(s.name),
+              appIds: Array.isArray(s.appIds) ? s.appIds : []
+            };
+            if (Array.isArray(s.steps)) scene.steps = s.steps;
+            ensureSceneSteps(scene); // 旧场景从 appIds 迁移为步骤列表
+            return scene;
+          })
         : [],
       autoCheckUpdates: loaded.autoCheckUpdates !== false,
       lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
@@ -2130,11 +2345,16 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     if (!data || !Array.isArray(data.apps)) return { ok: false, error: "缺少 apps 数组" };
     this.settings.apps = data.apps.map((app, index) => normalizeApp(app, index));
     if (Array.isArray(data.scenes)) {
-      this.settings.scenes = data.scenes.filter(s => s && s.name).map(s => ({
-        id: String(s.id || crypto.randomBytes(6).toString("hex")),
-        name: String(s.name),
-        appIds: Array.isArray(s.appIds) ? s.appIds : []
-      }));
+      this.settings.scenes = data.scenes.filter(s => s && s.name).map(s => {
+        const scene = {
+          id: String(s.id || crypto.randomBytes(6).toString("hex")),
+          name: String(s.name),
+          appIds: Array.isArray(s.appIds) ? s.appIds : []
+        };
+        if (Array.isArray(s.steps)) scene.steps = s.steps;
+        ensureSceneSteps(scene);
+        return scene;
+      });
     }
     if (Array.isArray(data.categories) && data.categories.length) {
       this.settings.categories = data.categories.filter(c => c && c.name).map((c, i) => ({
@@ -3540,7 +3760,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.settings.scenes.push({
       id: crypto.randomBytes(6).toString("hex"),
       name: trimmed,
-      appIds: [...appIds]
+      appIds: [...appIds],
+      steps: appIds.map(id => ({ type: "app", id: String(id) }))
     });
     await this.saveSettings();
     this.refreshSceneCommands();
@@ -3556,30 +3777,74 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.refreshViews();
   }
 
+  // 按步骤列表执行场景：应用错峰启动（已运行跳过）、笔记/文件夹直接打开、
+  // Obsidian 命令先检查存在再执行（白名单：只能是用户亲手挑进场景的命令 id）
   async launchScene(scene) {
-    const apps = scene.appIds
-      .map(id => this.settings.apps.find(a => a.id === id))
-      .filter(Boolean);
-    if (!apps.length) {
-      new Notice(`场景「${scene.name}」里没有可用应用`);
+    const steps = ensureSceneSteps(scene);
+    if (!steps.length) {
+      new Notice(`场景「${scene.name}」里没有步骤，点「步骤」按钮添加`);
       return;
     }
-    // 依赖感知：已在运行的应用跳过，不重复拉起
-    const running = await this.getRunningBundleIds();
-    const pending = [];
-    let skipped = 0;
-    for (const app of apps) {
-      const bundleId = await this.resolveBundleId(app);
-      if (bundleId && running.has(bundleId.toLowerCase())) skipped++;
-      else pending.push(app);
+    const hasAppStep = steps.some(s => s.type === "app");
+    const running = hasAppStep ? await this.getRunningBundleIds() : new Set();
+    let launched = 0, opened = 0, commands = 0, skippedRunning = 0;
+    const failed = [];
+    const vaultBase = () => (this.app.vault.adapter && this.app.vault.adapter.getBasePath) ? this.app.vault.adapter.getBasePath() : "";
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.type === "app") {
+        const app = this.settings.apps.find(a => a.id === step.id);
+        if (!app) { failed.push("应用已移除"); continue; }
+        const bundleId = await this.resolveBundleId(app);
+        if (bundleId && running.has(bundleId.toLowerCase())) { skippedRunning++; continue; }
+        await this.launchApp(app, { silent: true });
+        launched++;
+        // 错峰启动，避免同时拉起多个应用造成卡顿
+        if (steps.slice(i + 1).some(s => s.type === "app")) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } else if (step.type === "note") {
+        const file = this.app.vault.getAbstractFileByPath(step.path);
+        if (file instanceof TFile) {
+          await this.app.workspace.getLeaf(false).openFile(file);
+          opened++;
+        } else {
+          failed.push(`笔记不存在：${step.path}`);
+        }
+      } else if (step.type === "folder") {
+        const folder = this.app.vault.getAbstractFileByPath(step.path);
+        if (folder) {
+          try {
+            await execFileAsync("open", [path.join(vaultBase(), step.path)]);
+            opened++;
+          } catch (error) {
+            failed.push(`文件夹打开失败：${step.path}`);
+          }
+        } else {
+          failed.push(`文件夹不存在：${step.path}`);
+        }
+      } else if (step.type === "command") {
+        const registered = this.app.commands.commands && this.app.commands.commands[step.id];
+        if (!registered) {
+          failed.push(`命令不存在：${step.name || step.id}`);
+          continue;
+        }
+        try {
+          await this.app.commands.executeCommandById(step.id);
+          commands++;
+        } catch (error) {
+          failed.push(`命令执行失败：${step.name || step.id}`);
+        }
+      }
     }
-    // 错峰启动，避免同时拉起多个应用造成卡顿
-    for (let i = 0; i < pending.length; i++) {
-      await this.launchApp(pending[i], { silent: true });
-      if (i < pending.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    const suffix = skipped ? `，跳过 ${skipped} 个已在运行` : "";
-    new Notice(`场景「${scene.name}」已启动 ${pending.length} 个应用${suffix}`);
+    const parts = [];
+    if (launched) parts.push(`启动 ${launched} 个应用`);
+    if (opened) parts.push(`打开 ${opened} 个笔记/文件夹`);
+    if (commands) parts.push(`执行 ${commands} 个命令`);
+    if (skippedRunning) parts.push(`跳过 ${skippedRunning} 个已在运行`);
+    let message = parts.length ? `场景「${scene.name}」：${parts.join("，")}` : `场景「${scene.name}」没有可执行的步骤`;
+    if (failed.length) message += `；未完成：${failed.join("、")}`;
+    new Notice(message, 7000);
   }
 
   // 当前正在运行的应用 bundle ID 集合（小写）；查询失败时返回空集，退化为全部启动
@@ -3596,33 +3861,57 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   // ---- Canvas 工作流：把场景导出为可点击启动的画布 ----
   async exportSceneCanvas(scene) {
-    const apps = scene.appIds
-      .map(id => this.settings.apps.find(a => a.id === id))
-      .filter(Boolean);
-    if (!apps.length) {
-      new Notice(`场景「${scene.name}」里没有应用`);
+    const steps = ensureSceneSteps(scene);
+    if (!steps.length) {
+      new Notice(`场景「${scene.name}」里没有步骤`);
       return;
     }
     const nodes = [{
       id: "scene-title",
       type: "text",
-      text: `# 🎬 ${scene.name}\n共 ${apps.length} 个应用，点击卡片即可启动`,
+      text: `# 🎬 ${scene.name}\n${sceneStepsSummary(this, scene)}，应用节点可点击启动`,
       x: 0, y: -170, width: 420, height: 130
     }];
-    for (let i = 0; i < apps.length; i++) {
-      nodes.push({
-        id: `app-${apps[i].id}`,
-        type: "text",
-        text: `\`\`\`app-launcher\napp: ${apps[i].name}\n\`\`\``,
-        x: i * 300, y: 0, width: 250, height: 190
-      });
+    const nodeIds = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const nodeId = `step-${i}`;
+      if (step.type === "app") {
+        const app = this.settings.apps.find(a => a.id === step.id);
+        if (!app) continue;
+        nodes.push({
+          id: nodeId,
+          type: "text",
+          text: `\`\`\`app-launcher\napp: ${app.name}\n\`\`\``,
+          x: nodeIds.length * 300, y: 0, width: 250, height: 190
+        });
+      } else if (step.type === "note") {
+        nodes.push({ id: nodeId, type: "file", file: step.path, x: nodeIds.length * 300, y: 0, width: 300, height: 190 });
+      } else if (step.type === "folder") {
+        nodes.push({
+          id: nodeId,
+          type: "text",
+          text: `📁 **打开文件夹**\n${step.path}\n（启动场景时在 Finder 打开）`,
+          x: nodeIds.length * 300, y: 0, width: 250, height: 190
+        });
+      } else if (step.type === "command") {
+        nodes.push({
+          id: nodeId,
+          type: "text",
+          text: `⌘ **执行命令**\n${step.name || step.id}\n（启动场景时自动执行）`,
+          x: nodeIds.length * 300, y: 0, width: 250, height: 190
+        });
+      } else {
+        continue;
+      }
+      nodeIds.push(nodeId);
     }
     const edges = [];
-    for (let i = 0; i < apps.length - 1; i++) {
+    for (let i = 0; i < nodeIds.length - 1; i++) {
       edges.push({
         id: `edge-${i}`,
-        fromNode: `app-${apps[i].id}`, fromSide: "right",
-        toNode: `app-${apps[i + 1].id}`, toSide: "left"
+        fromNode: nodeIds[i], fromSide: "right",
+        toNode: nodeIds[i + 1], toSide: "left"
       });
     }
     const folder = "工作流";
@@ -3659,11 +3948,13 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   // 关闭场景：按 bundle ID 发送 macOS 原生退出指令（不受应用显示名语言影响），
   // 有未保存内容时应用会自行弹窗询问
   async closeScene(scene) {
-    const apps = scene.appIds
-      .map(id => this.settings.apps.find(a => a.id === id))
+    // 只对有 app 步骤的场景生效，笔记/文件夹/命令步骤没有「关闭」语义
+    const apps = ensureSceneSteps(scene)
+      .filter(s => s.type === "app")
+      .map(s => this.settings.apps.find(a => a.id === s.id))
       .filter(Boolean);
     if (!apps.length) {
-      new Notice(`场景「${scene.name}」里没有应用`);
+      new Notice(`场景「${scene.name}」里没有应用步骤`);
       return;
     }
     let closed = 0;
