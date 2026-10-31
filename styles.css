@@ -182,3 +182,7 @@
 .mal-md-desc{font-size:var(--font-smaller);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .mal-md-open{min-width:72px;background:var(--interactive-accent);color:var(--text-on-accent);border-color:var(--interactive-accent)}
 .mal-md-empty{color:var(--text-muted);font-size:var(--font-smaller);padding:6px 2px}
+
+/* 本篇笔记绑定区 */
+.mal-bind-bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.mal-app-card.is-missing{opacity:.55}

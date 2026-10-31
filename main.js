@@ -1,4 +1,4 @@
-const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu, Modal } = require("obsidian");
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu, Modal, TFile, TFolder } = require("obsidian");
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.9.0", changes: ["Frontmatter 应用绑定：笔记用 apps / app-scene 声明工作环境", "文件列表右键菜单：按文件类型推荐应用打开、启动绑定场景"] },
   { version: "1.8.0", changes: ["当前笔记智能推荐相关应用", "笔记内嵌 app-launcher 启动卡片", "场景注册到命令面板，一键启动"] },
   { version: "1.7.6", changes: ["设置页新增关于弹窗，内置更新日志"] },
   { version: "1.7.5", changes: ["关闭场景改为 bundle ID 匹配，中文名应用也能准确退出"] },
@@ -28,6 +29,15 @@ const DEFAULT_CATEGORY_META = [
   { name: "其他", icon: "📦" }, { name: "未分类", icon: "❓" }
 ];
 const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_META.map(c => c.name);
+
+// 文件右键菜单：扩展名 → 推荐应用分类
+const EXT_CATEGORY_RULES = [
+  { exts: ["md", "markdown", "txt"], cats: ["开发工具", "办公工具"] },
+  { exts: ["png", "jpg", "jpeg", "gif", "webp", "svg", "psd", "ai", "sketch", "fig", "heic", "tif", "tiff"], cats: ["设计工具"] },
+  { exts: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv"], cats: ["办公工具", "浏览器"] },
+  { exts: ["mp4", "mov", "m4v", "avi", "mkv", "flv", "mp3", "wav", "flac", "aac", "m4a"], cats: ["影音工具"] },
+  { exts: ["py", "js", "ts", "tsx", "jsx", "json", "html", "css", "java", "go", "rs", "rb", "php", "cpp", "c", "h", "sh", "yml", "yaml", "sql", "vue"], cats: ["开发工具"] }
+];
 
 // 归类学习：用户手动改过的分类按应用名记住，扫描时优先命中
 function learnedCategory(name, rules) {
@@ -483,6 +493,50 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
+  // 本篇笔记绑定区：展示 frontmatter 里声明的 apps / app-scene
+  renderNoteBindings(body) {
+    const bindings = this.plugin.getNoteBindings();
+    if (!bindings) return;
+    const section = body.createDiv({ cls: "mal-note-recs" });
+    section.createEl("h3", { text: "📌 本篇笔记绑定", cls: "mal-category" });
+    const bar = section.createDiv({ cls: "mal-bind-bar" });
+    const launchable = bindings.apps.filter(b => b.app);
+    if (launchable.length > 1) {
+      const all = bar.createEl("button", { text: `⚡ 全部启动（${launchable.length}）`, cls: "mal-nav-chip" });
+      all.addEventListener("click", async () => {
+        for (let i = 0; i < launchable.length; i++) {
+          await this.plugin.launchApp(launchable[i].app, { silent: true });
+          if (i < launchable.length - 1) await new Promise(r => setTimeout(r, 500));
+        }
+        new Notice(`已启动 ${launchable.length} 个绑定应用`);
+      });
+    }
+    for (const s of bindings.scenes) {
+      const chip = bar.createEl("button", { text: `▶ 场景：${s.name}`, cls: "mal-nav-chip" });
+      chip.addEventListener("click", () => {
+        if (s.scene) this.plugin.launchScene(s.scene);
+        else new Notice(`场景「${s.name}」不存在，请先在应用中心创建`);
+      });
+    }
+    if (bindings.apps.length) {
+      const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
+      for (const b of bindings.apps) {
+        const card = grid.createDiv({
+          cls: `mal-app-card ${b.app ? "" : "is-missing"}`,
+          attr: { tabindex: "0", role: "button", "aria-label": `启动 ${b.name}` }
+        });
+        const icon = card.createDiv({ cls: "mal-app-icon" });
+        if (b.app) this.plugin.renderAppIcon(icon, b.app);
+        else icon.createEl("span", { text: "❔", cls: "mal-fallback-icon" });
+        card.createDiv({ text: b.app ? b.app.name : b.name, cls: "mal-app-name" });
+        card.addEventListener("click", () => {
+          if (b.app) this.plugin.launchApp(b.app);
+          else new Notice(`「${b.name}」不在应用列表中，请先扫描或手动添加`);
+        });
+      }
+    }
+  }
+
   // 当前笔记推荐区：根据笔记名、文件夹与标签匹配应用，点击直接启动
   renderNoteRecommendations(body) {
     const recs = this.plugin.getNoteRecommendations(4);
@@ -528,7 +582,10 @@ class MacAppLauncherView extends ItemView {
     const filteredSearch = selected.filter(app =>
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
-    if (!term) this.renderNoteRecommendations(body);
+    if (!term) {
+      this.renderNoteBindings(body);
+      this.renderNoteRecommendations(body);
+    }
     this.renderCategoryNav(body, selected, term);
 
     if (!filteredSearch.length) {
@@ -1824,6 +1881,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.registerEvent(this.app.metadataCache.on("changed", debounce(() => this.refreshViews(), 500)));
     // 笔记内嵌应用启动卡片：```app-launcher 代码块
     this.registerMarkdownCodeBlockProcessor("app-launcher", (source, el) => this.renderLauncherBlock(source, el));
+    // 文件列表右键菜单：按类型打开 / 启动绑定场景
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.buildFileMenu(menu, file)));
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
       setTimeout(() => {
@@ -2750,6 +2809,88 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
       .map(([app]) => app);
+  }
+
+  // ---- Frontmatter 应用绑定：读取当前笔记的 apps / app-scene 声明 ----
+  getNoteBindings() {
+    const file = this.getActiveNoteFile();
+    if (!file) return null;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache && cache.frontmatter;
+    if (!fm) return null;
+    let appsRaw = fm.apps || fm.app || [];
+    if (typeof appsRaw === "string") appsRaw = [appsRaw];
+    if (!Array.isArray(appsRaw)) appsRaw = [];
+    let scenesRaw = fm["app-scene"] || fm["app-scenes"] || fm.scene || [];
+    if (typeof scenesRaw === "string") scenesRaw = [scenesRaw];
+    if (!Array.isArray(scenesRaw)) scenesRaw = [];
+    if (!appsRaw.length && !scenesRaw.length) return null;
+    const findApp = query => {
+      const q = String(query).toLowerCase();
+      return this.settings.apps.find(a => (a.name || "").toLowerCase() === q) ||
+        this.settings.apps.find(a => (a.name || "").toLowerCase().includes(q)) || null;
+    };
+    return {
+      apps: appsRaw.map(name => ({ name: String(name), app: findApp(name) })),
+      scenes: scenesRaw.map(name => ({
+        name: String(name),
+        scene: this.settings.scenes.find(s => s.name === String(name)) || null
+      }))
+    };
+  }
+
+  // ---- 文件列表右键菜单：按文件类型推荐应用打开 / 启动绑定场景 ----
+  buildFileMenu(menu, file) {
+    const base = this.app.vault.adapter.getBasePath();
+    if (file instanceof TFolder) {
+      menu.addItem(item => item
+        .setTitle("在 Finder 中打开")
+        .setIcon("folder-open")
+        .onClick(() => {
+          execFile("/usr/bin/open", [path.join(base, file.path)], err => {
+            if (err) new Notice("无法在 Finder 中打开该文件夹");
+          });
+        }));
+      return;
+    }
+    if (!(file instanceof TFile)) return;
+    const abs = path.join(base, file.path);
+    // 笔记 frontmatter 里声明的场景
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fm = cache && cache.frontmatter;
+    let scenesRaw = fm ? (fm["app-scene"] || fm["app-scenes"] || fm.scene || []) : [];
+    if (typeof scenesRaw === "string") scenesRaw = [scenesRaw];
+    if (!Array.isArray(scenesRaw)) scenesRaw = [];
+    const scenes = scenesRaw
+      .map(name => this.settings.scenes.find(s => s.name === String(name)))
+      .filter(Boolean);
+    if (scenes.length) menu.addSeparator();
+    for (const scene of scenes) {
+      menu.addItem(item => item
+        .setTitle(`启动场景：${scene.name}`)
+        .setIcon("play")
+        .onClick(() => this.launchScene(scene)));
+    }
+    // 按扩展名推荐应用
+    const rule = EXT_CATEGORY_RULES.find(r => r.exts.includes((file.extension || "").toLowerCase()));
+    if (!rule) return;
+    const candidates = this.settings.apps
+      .filter(a => a.selected && rule.cats.includes(a.category))
+      .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.launchCount || 0) - (a.launchCount || 0))
+      .slice(0, 3);
+    if (!candidates.length) return;
+    menu.addSeparator();
+    for (const app of candidates) {
+      menu.addItem(item => item
+        .setTitle(`用 ${app.name} 打开`)
+        .setIcon("external-link")
+        .onClick(() => {
+          execFile("/usr/bin/open", ["-a", app.path, abs], err => {
+            if (err) new Notice(`无法用 ${app.name} 打开该文件`);
+            else new Notice(`已用 ${app.name} 打开`);
+          });
+        }));
+    }
   }
 
   // ---- Markdown 启动卡片：```app-launcher 代码块 ----
