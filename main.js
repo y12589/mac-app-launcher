@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.16.0", changes: ["场景启动感知运行状态：已在运行的应用自动跳过，不重复拉起"] },
   { version: "1.15.0", changes: ["场景一键导出 Canvas 工作流：应用节点可点击启动，连线串联执行顺序"] },
   { version: "1.14.0", changes: ["一键生成 Bases 数据库视图，应用资料卡接入 Obsidian 原生数据库"] },
   { version: "1.13.0", changes: ["开放 window.MacAppLauncher API，QuickAdd / Templater 可直接启动应用与场景", "配置导入导出：应用、场景、分类一键跨 Vault 迁移"] },
@@ -3459,12 +3460,34 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       new Notice(`场景「${scene.name}」里没有可用应用`);
       return;
     }
-    // 错峰启动，避免同时拉起多个应用造成卡顿
-    for (let i = 0; i < apps.length; i++) {
-      await this.launchApp(apps[i], { silent: true });
-      if (i < apps.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
+    // 依赖感知：已在运行的应用跳过，不重复拉起
+    const running = await this.getRunningBundleIds();
+    const pending = [];
+    let skipped = 0;
+    for (const app of apps) {
+      const bundleId = await this.resolveBundleId(app);
+      if (bundleId && running.has(bundleId.toLowerCase())) skipped++;
+      else pending.push(app);
     }
-    new Notice(`场景「${scene.name}」已启动 ${apps.length} 个应用`);
+    // 错峰启动，避免同时拉起多个应用造成卡顿
+    for (let i = 0; i < pending.length; i++) {
+      await this.launchApp(pending[i], { silent: true });
+      if (i < pending.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    const suffix = skipped ? `，跳过 ${skipped} 个已在运行` : "";
+    new Notice(`场景「${scene.name}」已启动 ${pending.length} 个应用${suffix}`);
+  }
+
+  // 当前正在运行的应用 bundle ID 集合（小写）；查询失败时返回空集，退化为全部启动
+  async getRunningBundleIds() {
+    try {
+      const out = await execFileAsync("osascript", [
+        "-e", 'tell application "System Events" to get bundle identifier of every process whose background only is false'
+      ]);
+      return new Set(String(out || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean));
+    } catch (error) {
+      return new Set();
+    }
   }
 
   // ---- Canvas 工作流：把场景导出为可点击启动的画布 ----
