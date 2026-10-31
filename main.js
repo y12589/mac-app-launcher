@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.20.0", changes: ["自定义文件关联规则：扩展名绑定指定应用，右键菜单优先显示", "使用统计视图：Top 10 排行、最近启动、最近 7 天趋势"] },
   { version: "1.19.0", changes: ["画布自动执行支持命令与文件夹节点：场景导出的画布可以整条工作流一键执行"] },
   { version: "1.18.0", changes: ["场景升级为混合工作流：应用、笔记、文件夹、Obsidian 命令四种步骤有序执行", "命令白名单：只能执行亲手挑进场景的已注册命令，失效自动跳过并提示"] },
   { version: "1.17.1", changes: ["文档补齐：README 与 Agent 接入说明覆盖 1.8–1.17 全部新功能"] },
@@ -401,6 +402,169 @@ class SceneStepsModal extends Modal {
         onPick: async it => { steps.push(it.value); await this.persist(); }
       }).open();
     });
+  }
+}
+
+// 自定义文件关联规则编辑器：扩展名 → 指定应用
+class FileRulesModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  onOpen() {
+    this.renderBody();
+  }
+
+  async persist() {
+    await this.plugin.saveSettings();
+    this.renderBody();
+  }
+
+  renderBody() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("mal-steps-modal");
+    contentEl.createEl("h3", { text: "文件关联规则" });
+    contentEl.createEl("p", {
+      text: "文件列表右键菜单中，命中的扩展名会优先显示指定应用（高于内置分类推荐）。",
+      cls: "mal-add-custom-hint"
+    });
+    const rules = this.plugin.settings.fileRules;
+    const apps = this.plugin.settings.apps.filter(a => a.selected !== false);
+    const list = contentEl.createDiv({ cls: "mal-steps-list" });
+    rules.forEach((rule, index) => {
+      const row = list.createDiv({ cls: "mal-step-row" });
+      row.createEl("span", { text: `.${rule.ext}`, cls: "mal-rule-ext" });
+      row.createEl("span", { text: "→", cls: "mal-muted" });
+      const app = this.plugin.settings.apps.find(a => a.id === rule.appId);
+      row.createEl("span", { text: app ? app.name : "（应用已移除）", cls: "mal-step-label" });
+      const del = row.createEl("button", { text: "✕", cls: "mal-button mal-cat-move mal-button-danger" });
+      del.addEventListener("click", async () => {
+        rules.splice(index, 1);
+        await this.persist();
+      });
+    });
+    if (!rules.length) list.createEl("p", { text: "还没有规则。", cls: "mal-empty" });
+    const add = contentEl.createDiv({ cls: "mal-steps-add" });
+    const extInput = add.createEl("input", { cls: "mal-rule-input", attr: { type: "text", placeholder: "扩展名，如 blend" } });
+    const select = add.createEl("select", { cls: "mal-rule-select" });
+    for (const app of apps) {
+      const opt = select.createEl("option", { text: app.name });
+      opt.value = app.id;
+    }
+    const addBtn = add.createEl("button", { text: "添加规则", cls: "mal-primary" });
+    addBtn.addEventListener("click", async () => {
+      const ext = extInput.value.trim().replace(/^\./, "").toLowerCase();
+      if (!ext) { new Notice("请输入扩展名"); return; }
+      if (!select.value) { new Notice("请先勾选至少一个应用"); return; }
+      const existing = rules.find(r => r.ext === ext);
+      if (existing) existing.appId = select.value;
+      else rules.push({ ext, appId: select.value });
+      extInput.value = "";
+      await this.persist();
+    });
+  }
+}
+
+// 使用统计：总览、Top 10 排行、最近启动、7 天趋势（解析每日笔记日志）
+class UsageStatsModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-stats");
+    contentEl.createEl("h3", { text: "应用使用统计" });
+    const apps = this.plugin.settings.apps.filter(a => a.selected !== false);
+    const total = apps.reduce((sum, a) => sum + (a.launchCount || 0), 0);
+    contentEl.createEl("p", {
+      text: `${apps.length} 个应用 · 累计启动 ${total} 次 · ${this.plugin.settings.scenes.length} 个场景`,
+      cls: "mal-add-custom-hint"
+    });
+
+    contentEl.createEl("h4", { text: "使用排行 Top 10" });
+    const top = [...apps].sort((a, b) => (b.launchCount || 0) - (a.launchCount || 0)).slice(0, 10);
+    const max = top.length ? Math.max(top[0].launchCount || 0, 1) : 1;
+    const topBox = contentEl.createDiv({ cls: "mal-stats-box" });
+    if (!total) {
+      topBox.createEl("p", { text: "还没有启动记录。", cls: "mal-empty" });
+    }
+    for (const app of top) {
+      if (!app.launchCount) continue;
+      const row = topBox.createDiv({ cls: "mal-stats-row" });
+      row.createEl("span", { text: app.name, cls: "mal-stats-name" });
+      const barWrap = row.createDiv({ cls: "mal-stats-barwrap" });
+      barWrap.createDiv({ cls: "mal-stats-bar" }).style.width = `${Math.round((app.launchCount / max) * 100)}%`;
+      row.createEl("span", { text: String(app.launchCount), cls: "mal-stats-count" });
+    }
+
+    contentEl.createEl("h4", { text: "最近启动" });
+    const recent = [...apps].filter(a => a.lastLaunchedAt)
+      .sort((a, b) => b.lastLaunchedAt - a.lastLaunchedAt).slice(0, 8);
+    const recentBox = contentEl.createDiv({ cls: "mal-stats-box" });
+    if (!recent.length) recentBox.createEl("p", { text: "暂无记录。", cls: "mal-empty" });
+    for (const app of recent) {
+      const row = recentBox.createDiv({ cls: "mal-stats-row" });
+      row.createEl("span", { text: app.name, cls: "mal-stats-name" });
+      row.createEl("span", {
+        text: new Date(app.lastLaunchedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+        cls: "mal-stats-count"
+      });
+    }
+
+    contentEl.createEl("h4", { text: "最近 7 天趋势" });
+    const trend = await this.loadTrend();
+    const trendBox = contentEl.createDiv({ cls: "mal-stats-box" });
+    if (!trend) {
+      trendBox.createEl("p", {
+        text: "没有日志数据。在设置页开启「记录启动日志到每日笔记」后，这里会显示趋势。",
+        cls: "mal-empty"
+      });
+    } else {
+      const trendMax = Math.max(...trend.map(d => d.count), 1);
+      for (const day of trend) {
+        const row = trendBox.createDiv({ cls: "mal-stats-row" });
+        row.createEl("span", { text: day.label, cls: "mal-stats-name" });
+        const barWrap = row.createDiv({ cls: "mal-stats-barwrap" });
+        barWrap.createDiv({ cls: "mal-stats-bar is-trend" }).style.width = `${Math.round((day.count / trendMax) * 100)}%`;
+        row.createEl("span", { text: String(day.count), cls: "mal-stats-count" });
+      }
+    }
+  }
+
+  // 解析最近 7 天每日笔记「应用使用记录」小节的行数；没有数据返回 null
+  async loadTrend() {
+    let folder = "";
+    let format = "YYYY-MM-DD";
+    try {
+      const dn = this.app.internalPlugins && this.app.internalPlugins.plugins &&
+        this.app.internalPlugins.plugins["daily-notes"];
+      if (dn && dn.enabled && dn.instance && dn.instance.options) {
+        folder = dn.instance.options.folder || "";
+        format = dn.instance.options.format || "YYYY-MM-DD";
+      }
+    } catch (e) { /* 用默认值 */ }
+    const days = [];
+    let found = 0;
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(Date.now() - i * 86400000);
+      const filename = window.moment ? window.moment(date).format(format) : date.toISOString().slice(0, 10);
+      const notePath = `${folder ? folder + "/" : ""}${filename}.md`;
+      const label = `${date.getMonth() + 1}/${date.getDate()}`;
+      let count = 0;
+      const file = this.app.vault.getAbstractFileByPath(notePath);
+      if (file && file instanceof TFile) {
+        const content = await this.app.vault.read(file);
+        const matches = content.match(/^- \d{1,2}:\d{2} 启动 .+$/gm);
+        count = matches ? matches.length : 0;
+        if (count) found++;
+      }
+      days.push({ label, count });
+    }
+    return found ? days : null;
   }
 }
 
@@ -2075,6 +2239,23 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    // ── 文件关联与统计 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "文件关联与统计" });
+
+    new Setting(containerEl)
+      .setName("文件关联规则")
+      .setDesc("把指定扩展名绑定到指定应用，右键菜单优先显示（高于内置分类推荐）。")
+      .addButton(btn => btn.setButtonText("管理规则").onClick(() => {
+        new FileRulesModal(this.app, this.plugin).open();
+      }));
+
+    new Setting(containerEl)
+      .setName("应用使用统计")
+      .setDesc("使用排行、最近启动与最近 7 天趋势（趋势来自每日笔记启动日志）。")
+      .addButton(btn => btn.setButtonText("查看统计").onClick(() => {
+        new UsageStatsModal(this.app, this.plugin).open();
+      }));
+
     // ── 配置管理 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "配置管理" });
 
@@ -2162,7 +2343,14 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       downloadMirror: typeof loaded.downloadMirror === "string" ? loaded.downloadMirror : "",
       autoLaunchSceneId: typeof loaded.autoLaunchSceneId === "string" ? loaded.autoLaunchSceneId : "",
       logToDailyNote: loaded.logToDailyNote === true,
-      canvasExecuteEnabled: loaded.canvasExecuteEnabled !== false
+      canvasExecuteEnabled: loaded.canvasExecuteEnabled !== false,
+      // 自定义文件关联规则：扩展名 → 指定应用，优先级高于内置分类推荐
+      fileRules: Array.isArray(loaded.fileRules)
+        ? loaded.fileRules.filter(r => r && r.ext && r.appId).map(r => ({
+            ext: String(r.ext).replace(/^\./, "").toLowerCase(),
+            appId: String(r.appId)
+          }))
+        : []
     };
     this.scanning = false;
     this.scanCancelled = false;
@@ -2255,6 +2443,16 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       name: "执行当前画布的工作流",
       callback: () => this.executeActiveCanvas()
     });
+    this.addCommand({
+      id: "show-usage-stats",
+      name: "查看应用使用统计",
+      callback: () => new UsageStatsModal(this.app, this).open()
+    });
+    this.addCommand({
+      id: "manage-file-rules",
+      name: "管理文件关联规则",
+      callback: () => new FileRulesModal(this.app, this).open()
+    });
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
       setTimeout(() => {
@@ -2332,8 +2530,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   // ---- 配置导入导出：跨 Vault 迁移应用、场景与分类 ----
   exportConfig() {
-    const { apps, scenes, categories, categoryRules } = this.settings;
-    return JSON.stringify({ version: this.manifest.version, apps, scenes, categories, categoryRules }, null, 2);
+    const { apps, scenes, categories, categoryRules, fileRules } = this.settings;
+    return JSON.stringify({ version: this.manifest.version, apps, scenes, categories, categoryRules, fileRules }, null, 2);
   }
 
   async importConfig(text) {
@@ -2366,6 +2564,12 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     }
     if (data.categoryRules && typeof data.categoryRules === "object" && !Array.isArray(data.categoryRules)) {
       this.settings.categoryRules = data.categoryRules;
+    }
+    if (Array.isArray(data.fileRules)) {
+      this.settings.fileRules = data.fileRules.filter(r => r && r.ext && r.appId).map(r => ({
+        ext: String(r.ext).replace(/^\./, "").toLowerCase(),
+        appId: String(r.appId)
+      }));
     }
     this.settings.hasScanned = true;
     await this.saveSettings();
@@ -3558,11 +3762,29 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         .setIcon("play")
         .onClick(() => this.launchScene(scene)));
     }
+    // 自定义文件关联规则优先于内置分类推荐
+    const ext = (file.extension || "").toLowerCase();
+    const customRule = (this.settings.fileRules || []).find(r => r.ext === ext);
+    const customApp = customRule
+      ? this.settings.apps.find(a => a.id === customRule.appId && a.selected)
+      : null;
+    if (customApp) {
+      menu.addSeparator();
+      menu.addItem(item => item
+        .setTitle(`用 ${customApp.name} 打开（自定义规则）`)
+        .setIcon("star")
+        .onClick(() => {
+          execFile("/usr/bin/open", ["-a", customApp.path, abs], err => {
+            if (err) new Notice(`无法用 ${customApp.name} 打开该文件`);
+            else new Notice(`已用 ${customApp.name} 打开`);
+          });
+        }));
+    }
     // 按扩展名推荐应用
-    const rule = EXT_CATEGORY_RULES.find(r => r.exts.includes((file.extension || "").toLowerCase()));
+    const rule = EXT_CATEGORY_RULES.find(r => r.exts.includes(ext));
     if (!rule) return;
     const candidates = this.settings.apps
-      .filter(a => a.selected && rule.cats.includes(a.category))
+      .filter(a => a.selected && rule.cats.includes(a.category) && (!customApp || a.id !== customApp.id))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.launchCount || 0) - (a.launchCount || 0))
       .slice(0, 3);
     if (!candidates.length) return;

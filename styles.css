@@ -210,3 +210,16 @@
 .mal-picker-row:hover{background:var(--background-modifier-hover)}
 .mal-picker-label{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mal-picker-hint{font-size:var(--font-smaller);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:right}
+
+/* 文件关联规则与使用统计（1.20） */
+.mal-rule-ext{font-family:var(--font-monospace);font-weight:700;min-width:64px}
+.mal-rule-input{width:130px;padding:6px 10px;border:1px solid var(--background-modifier-border);border-radius:8px;background:var(--background-primary)}
+.mal-rule-select{flex:1;min-width:140px;padding:6px;border:1px solid var(--background-modifier-border);border-radius:8px;background:var(--background-primary)}
+.mal-stats h4{margin:16px 0 8px}
+.mal-stats-box{display:flex;flex-direction:column;gap:6px}
+.mal-stats-row{display:flex;align-items:center;gap:10px}
+.mal-stats-name{width:130px;flex:0 0 130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.mal-stats-barwrap{flex:1;height:10px;border-radius:5px;background:var(--background-secondary);overflow:hidden}
+.mal-stats-bar{height:100%;border-radius:5px;background:var(--interactive-accent)}
+.mal-stats-bar.is-trend{background:var(--color-green, #4caf50)}
+.mal-stats-count{min-width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted);font-size:var(--font-smaller)}
