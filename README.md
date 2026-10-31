@@ -1,4 +1,4 @@
-Mac App Launcher 1.4.0
+Mac App Launcher
 ======================
 
 适用：macOS + Obsidian 桌面版（Intel / Apple Silicon）。
