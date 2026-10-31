@@ -1024,6 +1024,8 @@ class MacAppLauncherView extends ItemView {
       row.createEl("span", { text: `${scene.appIds.length} 个应用`, cls: "mal-cat-count" });
       const launch = row.createEl("button", { text: "启动", cls: "mal-primary" });
       launch.addEventListener("click", () => this.plugin.launchScene(scene));
+      const close = row.createEl("button", { text: "关闭", cls: "mal-button" });
+      close.addEventListener("click", () => this.plugin.closeScene(scene));
       const del = row.createEl("button", { text: "删除", cls: "mal-button mal-button-danger" });
       del.addEventListener("click", async () => {
         await this.plugin.removeScene(scene.id);
@@ -1443,6 +1445,24 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
     header.createEl("h2", { text: "Mac App Launcher" });
     header.createSpan({ cls: "mal-settings-version", text: `v${this.plugin.manifest.version}` });
 
+    // ── 常规 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "常规" });
+
+    new Setting(containerEl)
+      .setName("启动时自动拉起场景")
+      .setDesc("打开 Obsidian 后约 3 秒自动启动该场景内的一组应用。")
+      .addDropdown(drop => {
+        drop.addOption("", "不自动启动");
+        for (const scene of this.plugin.settings.scenes) {
+          drop.addOption(scene.id, scene.name);
+        }
+        drop.setValue(this.plugin.settings.autoLaunchSceneId || "");
+        drop.onChange(async value => {
+          this.plugin.settings.autoLaunchSceneId = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
     // ── Agent API ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "Agent API" });
 
@@ -1550,6 +1570,19 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("下载加速镜像")
+      .setDesc("可选。直连 GitHub 下载更新不稳定时，填镜像前缀（如 https://mirror.ghproxy.com），留空则直连。下载失败会自动重试 3 次。")
+      .addText(text => {
+        text.inputEl.addClass("mal-mirror-input");
+        text.setPlaceholder("留空直连 GitHub");
+        text.setValue(this.plugin.settings.downloadMirror || "");
+        text.onChange(async value => {
+          this.plugin.settings.downloadMirror = value.trim();
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
       .setName("检查更新")
       .setDesc(`${this.plugin.getUpdateStatusText()}。点击立即检查一次，发现新版自动下载覆盖并重载。`)
       .addButton(button => {
@@ -1633,7 +1666,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         : [],
       autoCheckUpdates: loaded.autoCheckUpdates !== false,
       lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
-      latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : ""
+      latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : "",
+      downloadMirror: typeof loaded.downloadMirror === "string" ? loaded.downloadMirror : "",
+      autoLaunchSceneId: typeof loaded.autoLaunchSceneId === "string" ? loaded.autoLaunchSceneId : ""
     };
     this.scanning = false;
     this.scanCancelled = false;
@@ -1705,6 +1740,13 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.buildPinyin(this.settings.apps);
     // 注册单应用快捷键
     this.refreshAppHotkeys();
+    // 启动时自动拉起指定场景（延迟等待界面就绪）
+    if (this.settings.autoLaunchSceneId) {
+      setTimeout(() => {
+        const scene = (this.settings.scenes || []).find(s => s.id === this.settings.autoLaunchSceneId);
+        if (scene) this.launchScene(scene);
+      }, 3000);
+    }
   }
 
   // ---- 单应用快捷键 ----
@@ -1819,6 +1861,28 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     return `当前版本 ${current} · 最新已知版本 ${latest} · 上次检查 ${last}`;
   }
 
+  // 更新包下载地址：可选镜像前缀（解决国内直连 GitHub 不稳定）
+  releaseAssetUrl(version, file) {
+    const url = `https://github.com/y12589/mac-app-launcher/releases/download/${version}/${file}`;
+    const mirror = (this.settings.downloadMirror || "").trim().replace(/\/+$/, "");
+    return mirror ? `${mirror}/${url}` : url;
+  }
+
+  // 网络错误（ECONNRESET/超时等）自动重试，HTTP 状态错误不重试
+  async fetchWithRetry(url, tries = 3) {
+    let lastError = null;
+    for (let i = 0; i < tries; i++) {
+      try {
+        return await this.fetchBuffer(url);
+      } catch (error) {
+        lastError = error;
+        if (/^HTTP \d+/.test(String(error && error.message))) throw error;
+        if (i < tries - 1) await new Promise(resolve => setTimeout(resolve, 800 * (i + 1)));
+      }
+    }
+    throw lastError;
+  }
+
   fetchBuffer(url, redirects = 5) {
     return new Promise((resolve, reject) => {
       const req = https.get(url, {
@@ -1862,7 +1926,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     if (this.updateInProgress) return null;
     this.updateInProgress = true;
     try {
-      const buf = await this.fetchBuffer("https://api.github.com/repos/y12589/mac-app-launcher/releases/latest");
+      const buf = await this.fetchWithRetry("https://api.github.com/repos/y12589/mac-app-launcher/releases/latest");
       const release = JSON.parse(buf.toString("utf8"));
       const latest = String(release.tag_name || "").replace(/^v/, "");
       this.settings.latestVersion = latest;
@@ -1890,7 +1954,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     try {
       const downloaded = {};
       for (const file of files) {
-        const data = await this.fetchBuffer(`https://github.com/y12589/mac-app-launcher/releases/download/${version}/${file}`);
+        const data = await this.fetchWithRetry(this.releaseAssetUrl(version, file));
         if (!data || !data.length) throw new Error(`下载 ${file} 为空`);
         downloaded[file] = data;
       }
@@ -2689,6 +2753,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   async removeScene(id) {
     this.settings.scenes = this.settings.scenes.filter(s => s.id !== id);
+    if (this.settings.autoLaunchSceneId === id) this.settings.autoLaunchSceneId = "";
     await this.saveSettings();
     this.refreshViews();
   }
@@ -2701,10 +2766,35 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       new Notice(`场景「${scene.name}」里没有可用应用`);
       return;
     }
-    for (const app of apps) {
-      await this.launchApp(app, { silent: true });
+    // 错峰启动，避免同时拉起多个应用造成卡顿
+    for (let i = 0; i < apps.length; i++) {
+      await this.launchApp(apps[i], { silent: true });
+      if (i < apps.length - 1) await new Promise(resolve => setTimeout(resolve, 500));
     }
     new Notice(`场景「${scene.name}」已启动 ${apps.length} 个应用`);
+  }
+
+  // 关闭场景：发送 macOS 原生退出指令，有未保存内容时应用会自行弹窗询问
+  async closeScene(scene) {
+    const apps = scene.appIds
+      .map(id => this.settings.apps.find(a => a.id === id))
+      .filter(Boolean);
+    if (!apps.length) {
+      new Notice(`场景「${scene.name}」里没有应用`);
+      return;
+    }
+    let closed = 0;
+    for (let i = 0; i < apps.length; i++) {
+      try {
+        const safeName = String(apps[i].name || "").replace(/"/g, '\\"');
+        await execFileAsync("osascript", ["-e", `tell application "${safeName}" to quit`]);
+        closed++;
+      } catch (error) {
+        // 应用未运行或拒绝退出，跳过
+      }
+      if (i < apps.length - 1) await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    new Notice(`场景「${scene.name}」已退出 ${closed}/${apps.length} 个应用（未保存内容会弹窗询问）`, 6000);
   }
 
   // ---- 拼音搜索 ----
