@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.1", changes: ["修复：重扫应用后关联笔记、置顶顺序、单应用快捷键丢失", "修复：配置迁移备份与调试日志因目录方法缺失静默失效（schemaVersion 卡住）", "关联笔记自愈：按名称兜底命中后自动回写绑定"] },
   { version: "1.24.0", changes: ["开发者 API v2：search / getApp / scenes / isRunning 查询接口", "启动事件订阅：on(\"app-launched\" / \"scene-launched\")，第三方插件可联动", "新增 DEV-API.md 开发者文档"] },
   { version: "1.23.0", changes: ["非 macOS 平台明确提示并自动停用，不再静默失效", "下载镜像强制 https:// 协议白名单，非法镜像自动回退直连并提示"] },
   { version: "1.22.0", changes: ["性能包：应用网格分批渲染，几百个应用也不卡", "图标懒加载：滚动进视口才读取图标，管理页同样生效", "扫描与场景执行写入调试日志，方便观察耗时"] },
@@ -2458,10 +2459,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           fs.copyFileSync(dataFile, `${dataFile}.v${this.settings.schemaVersion || 1}.bak`);
           console.log(`[Mac App Launcher] 旧配置已备份：data.json.v${this.settings.schemaVersion || 1}.bak`);
         }
-        this.settings.schemaVersion = SCHEMA_VERSION;
       } catch (error) {
         console.error("[Mac App Launcher] 配置备份失败", error);
       }
+      // 无论备份是否成功都推进版本号，避免备份失败导致每次启动重复尝试
+      this.settings.schemaVersion = SCHEMA_VERSION;
     }
     this.scanning = false;
     this.scanCancelled = false;
@@ -3425,6 +3427,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     );
   }
 
+  // 别名：历史代码两个名字都在用（迁移备份 / 调试日志 / 维护按钮），缺它会静默失败
+  pluginDirPath() {
+    return this.getPluginDirectory();
+  }
+
   discoverAppPaths() {
     const found = new Set();
     const home = os.homedir();
@@ -3530,7 +3537,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
             iconPath: old?.iconPath && fs.existsSync(old.iconPath) ? old.iconPath : "",
             iconSource: info.iconSource || old?.iconSource || "",
             launchCount: old?.launchCount || 0,
-            lastLaunchedAt: old?.lastLaunchedAt || null
+            lastLaunchedAt: old?.lastLaunchedAt || null,
+            // 用户绑定数据必须跨重扫保留：关联笔记、置顶顺序、快捷键
+            notePath: old?.notePath || "",
+            pinnedOrder: old?.pinnedOrder,
+            hotkey: old?.hotkey || ""
           }, results.length));
 
           completed++;
@@ -3887,7 +3898,14 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     candidates.push(`${APP_NOTES_FOLDER}/${String(app.name).replace(/[\\/:*?"<>|]/g, "-")}.md`);
     for (const p of candidates) {
       const f = this.app.vault.getAbstractFileByPath(p);
-      if (f && f instanceof TFile) return f;
+      if (f && f instanceof TFile) {
+        // 自愈：兜底命中但 notePath 缺失/过期时回写，关联越用越牢
+        if (app.notePath !== f.path) {
+          app.notePath = f.path;
+          this.saveSettings();
+        }
+        return f;
+      }
     }
     return null;
   }
