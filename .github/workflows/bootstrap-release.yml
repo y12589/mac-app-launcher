@@ -32,7 +32,8 @@ jobs:
           test -f "$SRC/main.js"
           test -f "$SRC/manifest.json"
           test -f "$SRC/styles.css"
-          node -e "const m=require('$SRC/manifest.json'); if(m.id!=='mac-app-launcher'||m.version!=='1.4.1') throw new Error('Unexpected plugin id/version')"
+          VERSION=$(node -e "const m=require('$SRC/manifest.json'); if(m.id!=='mac-app-launcher') throw new Error('Unexpected plugin id'); if(!/^\d+\.\d+\.\d+$/.test(m.version)) throw new Error('Unexpected plugin version'); console.log(m.version)")
+          echo "PLUGIN_VERSION=$VERSION" >> "$GITHUB_ENV"
           cp "$SRC/main.js" "$SRC/manifest.json" "$SRC/styles.css" .
           cp "$SRC/README.md" README.md
           cp "$SRC/AGENT-API.md" AGENT-API.md
@@ -50,18 +51,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Release Mac App Launcher v1.4.1"
-          git tag 1.4.1
+          git commit -m "Release Mac App Launcher v$PLUGIN_VERSION"
+          git tag "$PLUGIN_VERSION"
           git push origin HEAD:YDD
-          git push origin 1.4.1
-          echo "version=1.4.1" >> "$GITHUB_OUTPUT"
+          git push origin "$PLUGIN_VERSION"
+          echo "version=$PLUGIN_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release for BRAT
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: 1.4.1
+          tag_name: ${{ env.PLUGIN_VERSION }}
           target_commitish: YDD
-          name: Mac App Launcher 1.4.1
+          name: Mac App Launcher ${{ env.PLUGIN_VERSION }}
           body_path: CHANGELOG.md
           make_latest: true
           files: |
