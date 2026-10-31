@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.17.1", changes: ["文档补齐：README 与 Agent 接入说明覆盖 1.8–1.17 全部新功能"] },
   { version: "1.17.0", changes: ["Canvas 工作流自动执行：按连线顺序启动应用、打开笔记，循环连线自动拦截"] },
   { version: "1.16.0", changes: ["场景启动感知运行状态：已在运行的应用自动跳过，不重复拉起"] },
   { version: "1.15.0", changes: ["场景一键导出 Canvas 工作流：应用节点可点击启动，连线串联执行顺序"] },
