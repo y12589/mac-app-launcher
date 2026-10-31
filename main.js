@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.22.0", changes: ["性能包：应用网格分批渲染，几百个应用也不卡", "图标懒加载：滚动进视口才读取图标，管理页同样生效", "扫描与场景执行写入调试日志，方便观察耗时"] },
   { version: "1.21.0", changes: ["配置版本化：旧配置自动备份后迁移，升级可回滚", "调试日志（可开关、可清除），一键清除使用统计与图标缓存"] },
   { version: "1.20.0", changes: ["自定义文件关联规则：扩展名绑定指定应用，右键菜单优先显示", "使用统计视图：Top 10 排行、最近启动、最近 7 天趋势"] },
   { version: "1.19.0", changes: ["画布自动执行支持命令与文件夹节点：场景导出的画布可以整条工作流一键执行"] },
@@ -782,7 +783,31 @@ class MacAppLauncherView extends ItemView {
   getDisplayText() { return "Mac 应用中心"; }
   getIcon() { return "layout-grid"; }
   async onOpen() { this.render(); }
-  async onClose() {}
+  async onClose() { this.disconnectIconObserver(); }
+
+  disconnectIconObserver() {
+    if (this.iconObserver) {
+      this.iconObserver.disconnect();
+      this.iconObserver = null;
+    }
+  }
+
+  // 图标懒加载：进入视口（含 200px 预载边距）才真正读取图标文件
+  observeIcon(el, app) {
+    if (!this.iconObserver) {
+      this.iconObserver = new IntersectionObserver(entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          this.iconObserver.unobserve(entry.target);
+          if (entry.target.isConnected && entry.target._malApp) {
+            this.plugin.renderAppIcon(entry.target, entry.target._malApp);
+          }
+        }
+      }, { rootMargin: "200px" });
+    }
+    el._malApp = app;
+    this.iconObserver.observe(el);
+  }
 
   render() {
     const root = this.contentEl;
@@ -857,6 +882,7 @@ class MacAppLauncherView extends ItemView {
   }
 
   renderBody(body) {
+    this.disconnectIconObserver();
     body.empty();
     const term = this.searchTerm.trim().toLocaleLowerCase();
     if (this.mode === "manage") this.renderManager(body, term);
@@ -1079,128 +1105,145 @@ class MacAppLauncherView extends ItemView {
       return aKey - bKey || a.name.localeCompare(b.name, "zh-Hans-CN");
     });
 
-    for (const app of sorted) {
-      const card = grid.createDiv({
-        cls: "mal-app-card",
-        attr: { draggable: "true", tabindex: "0", role: "button", "aria-label": `查看 ${app.name} 介绍` }
-      });
-      const icon = card.createDiv({ cls: "mal-app-icon" });
-      this.plugin.renderAppIcon(icon, app);
-      card.createDiv({ text: app.name, cls: "mal-app-name" });
+    // 分批渲染：首屏 60 张同步出，其余按帧追加，应用很多时也不卡主线程
+    const BATCH = 60;
+    let index = 0;
+    const renderBatch = () => {
+      if (!grid.isConnected) return; // 视图已重绘，丢弃剩余批次
+      const frag = document.createDocumentFragment();
+      const end = Math.min(index + BATCH, sorted.length);
+      for (; index < end; index++) frag.appendChild(this.buildAppCard(sorted[index]));
+      grid.appendChild(frag);
+      if (index < sorted.length) requestAnimationFrame(renderBatch);
+    };
+    renderBatch();
+  }
 
-      const pin = card.createEl("button", {
-        text: app.pinned ? "★" : "☆",
-        cls: `mal-pin-btn ${app.pinned ? "is-pinned" : ""}`,
-        attr: { type: "button", title: app.pinned ? "取消置顶" : "置顶应用" }
-      });
-      pin.addEventListener("click", async event => {
-        event.stopPropagation();
-        await this.plugin.togglePin(app);
-        this.render();
-      });
+  // 单个应用卡片（含全部交互），由 renderAppSection 分批挂载
+  buildAppCard(app) {
+    const card = document.createElement("div");
+    card.className = "mal-app-card";
+    card.setAttribute("draggable", "true");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `查看 ${app.name} 介绍`);
+    const icon = card.createDiv({ cls: "mal-app-icon" });
+    this.observeIcon(icon, app);
+    card.createDiv({ text: app.name, cls: "mal-app-name" });
 
-      card.addEventListener("click", event => {
-        if (event.target.closest(".mal-pin-btn")) return;
+    const pin = card.createEl("button", {
+      text: app.pinned ? "★" : "☆",
+      cls: `mal-pin-btn ${app.pinned ? "is-pinned" : ""}`,
+      attr: { type: "button", title: app.pinned ? "取消置顶" : "置顶应用" }
+    });
+    pin.addEventListener("click", async event => {
+      event.stopPropagation();
+      await this.plugin.togglePin(app);
+      this.render();
+    });
+
+    card.addEventListener("click", event => {
+      if (event.target.closest(".mal-pin-btn")) return;
+      this.detailAppId = app.id;
+      this.editingDetail = false;
+      this.render();
+    });
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
         this.detailAppId = app.id;
         this.editingDetail = false;
         this.render();
-      });
-      card.addEventListener("keydown", event => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          this.detailAppId = app.id;
-          this.editingDetail = false;
-          this.render();
-        }
-      });
+      }
+    });
 
-      card.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        const menu = new Menu();
+    card.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = new Menu();
+      menu.addItem(item => item
+        .setTitle(`打开 ${app.name}`)
+        .setIcon("play")
+        .onClick(() => this.plugin.launchApp(app)));
+      menu.addItem(item => item
+        .setTitle(app.pinned ? "取消置顶" : "置顶应用")
+        .setIcon("pin")
+        .onClick(async () => {
+          await this.plugin.togglePin(app);
+          this.render();
+        }));
+      menu.addSeparator();
+      menu.addItem(item => item
+        .setTitle("在 Finder 中显示")
+        .setIcon("folder-open")
+        .onClick(() => this.plugin.revealInFinder(app)));
+      menu.addItem(item => item
+        .setTitle("复制应用路径")
+        .setIcon("copy")
+        .onClick(() => {
+          navigator.clipboard.writeText(app.path || "");
+          new Notice("已复制应用路径");
+        }));
+      menu.addItem(item => item
+        .setTitle("打开 / 创建应用笔记")
+        .setIcon("file-text")
+        .onClick(() => this.plugin.openAppNote(app)));
+      // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
+      if (this.plugin.isEditorApp(app)) {
         menu.addItem(item => item
-          .setTitle(`打开 ${app.name}`)
-          .setIcon("play")
-          .onClick(() => this.plugin.launchApp(app)));
+          .setTitle(`用 ${app.name} 打开当前库`)
+          .setIcon("vault")
+          .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
+      }
+      if (this.plugin.isTerminalApp(app)) {
+        const note = this.plugin.getActiveNoteFile();
+        const dir = note && note.parent && note.parent.path
+          ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
+          : this.app.vault.adapter.getBasePath();
         menu.addItem(item => item
-          .setTitle(app.pinned ? "取消置顶" : "置顶应用")
-          .setIcon("pin")
-          .onClick(async () => {
-            await this.plugin.togglePin(app);
-            this.render();
-          }));
+          .setTitle(`在 ${app.name} 中打开${note && note.parent && note.parent.path ? "笔记目录" : "库根目录"}`)
+          .setIcon("terminal")
+          .onClick(() => this.plugin.openPathWithApp(app, dir)));
+      }
+      if (app.custom) {
         menu.addSeparator();
         menu.addItem(item => item
-          .setTitle("在 Finder 中显示")
-          .setIcon("folder-open")
-          .onClick(() => this.plugin.revealInFinder(app)));
-        menu.addItem(item => item
-          .setTitle("复制应用路径")
-          .setIcon("copy")
-          .onClick(() => {
-            navigator.clipboard.writeText(app.path || "");
-            new Notice("已复制应用路径");
+          .setTitle("移除应用")
+          .setIcon("trash")
+          .onClick(async () => {
+            await this.plugin.removeCustomApp(app);
+            new Notice(`已移除：${app.name}`);
+            this.render();
           }));
-        menu.addItem(item => item
-          .setTitle("打开 / 创建应用笔记")
-          .setIcon("file-text")
-          .onClick(() => this.plugin.openAppNote(app)));
-        // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
-        if (this.plugin.isEditorApp(app)) {
-          menu.addItem(item => item
-            .setTitle(`用 ${app.name} 打开当前库`)
-            .setIcon("vault")
-            .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
-        }
-        if (this.plugin.isTerminalApp(app)) {
-          const note = this.plugin.getActiveNoteFile();
-          const dir = note && note.parent && note.parent.path
-            ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
-            : this.app.vault.adapter.getBasePath();
-          menu.addItem(item => item
-            .setTitle(`在 ${app.name} 中打开${note && note.parent && note.parent.path ? "笔记目录" : "库根目录"}`)
-            .setIcon("terminal")
-            .onClick(() => this.plugin.openPathWithApp(app, dir)));
-        }
-        if (app.custom) {
-          menu.addSeparator();
-          menu.addItem(item => item
-            .setTitle("移除应用")
-            .setIcon("trash")
-            .onClick(async () => {
-              await this.plugin.removeCustomApp(app);
-              new Notice(`已移除：${app.name}`);
-              this.render();
-            }));
-        }
-        menu.showAtMouseEvent(event);
-      });
+      }
+      menu.showAtMouseEvent(event);
+    });
 
-      card.addEventListener("dragstart", event => {
-        if (event.target.closest(".mal-pin-btn")) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer.setData("text/plain", app.id);
-        event.dataTransfer.effectAllowed = "move";
-        card.addClass("is-dragging");
-      });
-      card.addEventListener("dragend", () => card.removeClass("is-dragging"));
-      card.addEventListener("dragover", event => {
+    card.addEventListener("dragstart", event => {
+      if (event.target.closest(".mal-pin-btn")) {
         event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        card.addClass("is-drop-target");
-      });
-      card.addEventListener("dragleave", () => card.removeClass("is-drop-target"));
-      card.addEventListener("drop", async event => {
-        event.preventDefault();
-        card.removeClass("is-drop-target");
-        const sourceId = event.dataTransfer.getData("text/plain");
-        if (!sourceId || sourceId === app.id) return;
-        await this.plugin.moveAppToTarget(sourceId, app.id);
-        this.render();
-      });
-    }
+        return;
+      }
+      event.dataTransfer.setData("text/plain", app.id);
+      event.dataTransfer.effectAllowed = "move";
+      card.addClass("is-dragging");
+    });
+    card.addEventListener("dragend", () => card.removeClass("is-dragging"));
+    card.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      card.addClass("is-drop-target");
+    });
+    card.addEventListener("dragleave", () => card.removeClass("is-drop-target"));
+    card.addEventListener("drop", async event => {
+      event.preventDefault();
+      card.removeClass("is-drop-target");
+      const sourceId = event.dataTransfer.getData("text/plain");
+      if (!sourceId || sourceId === app.id) return;
+      await this.plugin.moveAppToTarget(sourceId, app.id);
+      this.render();
+    });
+    return card;
   }
 
   renderDetailPanel(body) {
@@ -1467,7 +1510,7 @@ class MacAppLauncherView extends ItemView {
       });
 
       const icon = row.createDiv({ cls: "mal-manage-icon" });
-      this.plugin.renderAppIcon(icon, app);
+      this.observeIcon(icon, app);
 
       const info = row.createDiv({ cls: "mal-app-info" });
       info.createEl("div", { text: app.name, cls: "mal-manage-name" });
@@ -3373,6 +3416,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.scanTotal = 0;
     this.scanStatus = "正在读取应用目录…";
     this.refreshViews();
+    const scanStartedAt = Date.now();
     this.debugLog("开始扫描应用");
     new Notice("开始快速扫描常见 Mac 应用目录…");
 
@@ -3440,6 +3484,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       this.settings.hasScanned = true;
       await this.saveSettings();
       this.scanStatus = `扫描完成：发现 ${results.length} 个应用`;
+      this.debugLog(`扫描完成：${results.length} 个应用，耗时 ${Date.now() - scanStartedAt}ms`);
       new Notice(`扫描完成：发现 ${results.length} 个应用。`, 7000);
       // 后台构建拼音索引（不阻塞扫描完成）
       this.buildPinyin(this.settings.apps);
@@ -4179,6 +4224,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     if (skippedRunning) parts.push(`跳过 ${skippedRunning} 个已在运行`);
     let message = parts.length ? `场景「${scene.name}」：${parts.join("，")}` : `场景「${scene.name}」没有可执行的步骤`;
     if (failed.length) message += `；未完成：${failed.join("、")}`;
+    this.debugLog(`场景「${scene.name}」执行结束：${parts.join("，") || "无可执行步骤"}${failed.length ? `；未完成 ${failed.length} 项` : ""}`);
     new Notice(message, 7000);
   }
 
