@@ -11,6 +11,7 @@ const VIEW_TYPE = "mac-app-launcher-view";
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.14.0", changes: ["一键生成 Bases 数据库视图，应用资料卡接入 Obsidian 原生数据库"] },
   { version: "1.13.0", changes: ["开放 window.MacAppLauncher API，QuickAdd / Templater 可直接启动应用与场景", "配置导入导出：应用、场景、分类一键跨 Vault 迁移"] },
   { version: "1.12.0", changes: ["编辑器类应用可直接打开当前 Vault，终端类应用可进入当前笔记目录"] },
   { version: "1.11.0", changes: ["启动日志可自动写入每日笔记（默认关闭，设置页开启）"] },
@@ -1860,6 +1861,13 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         new ImportConfigModal(this.app, this.plugin).open();
       }));
 
+    new Setting(containerEl)
+      .setName("Bases 数据库视图")
+      .setDesc("生成「应用资料.base」，把应用资料卡接入 Obsidian Bases 数据库（需 Obsidian 1.9+）。")
+      .addButton(btn => btn.setButtonText("生成视图").onClick(() => {
+        this.plugin.createBasesFile();
+      }));
+
     // ── 关于 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "关于" });
 
@@ -2003,6 +2011,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.buildFileMenu(menu, file)));
     // 公开 API：供 QuickAdd / Templater 等插件调用
     this.registerPublicApi();
+    this.addCommand({
+      id: "create-bases-view",
+      name: "生成应用 Bases 数据库视图",
+      callback: () => this.createBasesFile()
+    });
     // 启动时自动拉起指定场景（延迟等待界面就绪）
     if (this.settings.autoLaunchSceneId) {
       setTimeout(() => {
@@ -2116,6 +2129,35 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.refreshSceneCommands();
     this.refreshViews();
     return { ok: true, apps: this.settings.apps.length, scenes: this.settings.scenes.length };
+  }
+
+  // ---- Bases 数据库视图：应用资料卡接入 Obsidian 原生数据库 ----
+  async createBasesFile() {
+    const content = [
+      "filters:",
+      "  and:",
+      '    - type == "application"',
+      "views:",
+      "  - type: table",
+      "    name: 全部应用",
+      "    order:",
+      "      - file.name",
+      "      - app-name",
+      "      - category",
+      "      - status",
+      "  - type: cards",
+      "    name: 应用卡片",
+      ""
+    ].join("\n");
+    const basePath = "应用资料.base";
+    const existing = this.app.vault.getAbstractFileByPath(basePath);
+    if (existing && existing instanceof TFile) {
+      await this.app.vault.modify(existing, content);
+    } else {
+      await this.app.vault.create(basePath, content);
+    }
+    new Notice("已生成「应用资料.base」，在 Bases 中打开即可筛选应用资料卡", 6000);
+    return basePath;
   }
 
   // ---- 公开 API：供 QuickAdd 宏、Templater 脚本调用 ----
