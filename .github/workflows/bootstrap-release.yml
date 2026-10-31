@@ -1,0 +1,70 @@
+name: Bootstrap Mac App Launcher release
+
+on:
+  push:
+    branches: [YDD]
+    paths:
+      - ".bootstrap/READY"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: YDD
+          fetch-depth: 0
+
+      - name: Reassemble and extract source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .bootstrap/READY
+          cat .bootstrap/chunk-*.txt | base64 --decode > /tmp/mac-app-launcher-source.zip
+          mkdir -p /tmp/mac-app-launcher-source
+          unzip -q /tmp/mac-app-launcher-source.zip -d /tmp/mac-app-launcher-source
+          SRC=/tmp/mac-app-launcher-source/mac-app-launcher
+          test -f "$SRC/main.js"
+          test -f "$SRC/manifest.json"
+          test -f "$SRC/styles.css"
+          node -e "const m=require('$SRC/manifest.json'); if(m.id!=='mac-app-launcher'||m.version!=='1.4.0') throw new Error('Unexpected plugin id/version')"
+          cp "$SRC/main.js" "$SRC/manifest.json" "$SRC/styles.css" .
+          cp "$SRC/README.md" README.md
+          cp "$SRC/AGENT-API.md" AGENT-API.md
+          cp "$SRC/CHANGELOG.md" CHANGELOG.md
+          cp "$SRC/versions.json" versions.json
+          cp "$SRC/LICENSE" LICENSE
+          cp "$SRC/.gitignore" .gitignore
+          rm -rf .bootstrap
+
+      - name: Commit plugin source and create tag
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release Mac App Launcher v1.4.0"
+          git tag 1.4.0
+          git push origin HEAD:YDD
+          git push origin 1.4.0
+          echo "version=1.4.0" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release for BRAT
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 1.4.0
+          target_commitish: YDD
+          name: Mac App Launcher 1.4.0
+          body_path: CHANGELOG.md
+          make_latest: true
+          files: |
+            main.js
+            manifest.json
+            styles.css
