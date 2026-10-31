@@ -1548,6 +1548,32 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
           }
         });
       });
+
+    containerEl.createEl("h3", { text: "关于" });
+    new Setting(containerEl)
+      .setName("Mac App Launcher")
+      .setDesc(`版本 ${this.plugin.manifest.version} · 作者：y12589`)
+      .addButton(button => {
+        button.setButtonText("GitHub 仓库");
+        button.onClick(() => {
+          window.open("https://github.com/y12589/mac-app-launcher", "_blank");
+        });
+      })
+      .addButton(button => {
+        button.setButtonText("更新日志");
+        button.onClick(() => {
+          window.open("https://github.com/y12589/mac-app-launcher/blob/YDD/CHANGELOG.md", "_blank");
+        });
+      });
+    new Setting(containerEl)
+      .setName("问题反馈")
+      .setDesc("遇到问题或有功能建议，欢迎到 GitHub Issues 提交。")
+      .addButton(button => {
+        button.setButtonText("提交 Issue");
+        button.onClick(() => {
+          window.open("https://github.com/y12589/mac-app-launcher/issues", "_blank");
+        });
+      });
   }
 }
 
