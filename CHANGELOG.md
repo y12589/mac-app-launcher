@@ -1,5 +1,9 @@
 # 更新日志
 
+## 1.7.5
+
+- 关闭场景改为 bundle ID 匹配：从应用 Info.plist 读取 CFBundleIdentifier 后用 `tell application id` 退出，不再依赖应用显示名，中文名应用也能准确退出；bundle ID 读取结果自动缓存，只读一次。
+
 ## 1.7.4
 
 - 下载加速与重试：检查更新与下载更新包失败（ECONNRESET、超时等网络错误）自动重试最多 3 次；设置页新增「下载加速镜像」可选项，填镜像前缀后走镜像下载更新包，留空直连 GitHub。

@@ -2774,7 +2774,20 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     new Notice(`场景「${scene.name}」已启动 ${apps.length} 个应用`);
   }
 
-  // 关闭场景：发送 macOS 原生退出指令，有未保存内容时应用会自行弹窗询问
+  // 读取应用的 CFBundleIdentifier（结果缓存在 app.bundleId，避免重复读 plist）
+  async resolveBundleId(app) {
+    if (app.bundleId) return app.bundleId;
+    try {
+      const out = await execFileAsync("defaults", ["read", path.join(app.path, "Contents", "Info"), "CFBundleIdentifier"]);
+      app.bundleId = String(out || "").trim();
+    } catch (error) {
+      app.bundleId = "";
+    }
+    return app.bundleId;
+  }
+
+  // 关闭场景：按 bundle ID 发送 macOS 原生退出指令（不受应用显示名语言影响），
+  // 有未保存内容时应用会自行弹窗询问
   async closeScene(scene) {
     const apps = scene.appIds
       .map(id => this.settings.apps.find(a => a.id === id))
@@ -2784,16 +2797,21 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       return;
     }
     let closed = 0;
+    let resolved = false;
     for (let i = 0; i < apps.length; i++) {
       try {
-        const safeName = String(apps[i].name || "").replace(/"/g, '\\"');
-        await execFileAsync("osascript", ["-e", `tell application "${safeName}" to quit`]);
+        const before = apps[i].bundleId;
+        const bundleId = await this.resolveBundleId(apps[i]);
+        if (bundleId && bundleId !== before) resolved = true;
+        if (!bundleId) continue;
+        await execFileAsync("osascript", ["-e", `tell application id "${bundleId}" to quit`]);
         closed++;
       } catch (error) {
         // 应用未运行或拒绝退出，跳过
       }
       if (i < apps.length - 1) await new Promise(resolve => setTimeout(resolve, 300));
     }
+    if (resolved) await this.saveSettings(); // 缓存新读到的 bundleId
     new Notice(`场景「${scene.name}」已退出 ${closed}/${apps.length} 个应用（未保存内容会弹窗询问）`, 6000);
   }
 
