@@ -1,10 +1,11 @@
-const { Plugin, ItemView, Notice } = require("obsidian");
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting } = require("obsidian");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const http = require("http");
+const https = require("https");
 
 const VIEW_TYPE = "mac-app-launcher-view";
 const DEFAULT_CATEGORIES = [
@@ -692,6 +693,128 @@ class MacAppLauncherView extends ItemView {
   }
 }
 
+class MacAppLauncherSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl("h2", { text: "Mac App Launcher 设置" });
+
+    containerEl.createEl("h3", { text: "Agent API" });
+    new Setting(containerEl)
+      .setName("启用 Agent API")
+      .setDesc("关闭后本机 127.0.0.1 的 Agent 启动接口停止服务，插件其余功能不受影响。")
+      .addToggle(toggle => {
+        toggle.setValue(!!this.plugin.settings.agentApiEnabled);
+        toggle.onChange(async value => {
+          this.plugin.settings.agentApiEnabled = value;
+          await this.plugin.saveSettings();
+          if (value) {
+            try {
+              await this.plugin.startAgentServer();
+            } catch (error) {
+              new Notice(`Agent API 启动失败：${error.message || error}`, 8000);
+            }
+          } else {
+            await this.plugin.stopAgentServer();
+          }
+          this.display();
+        });
+      });
+
+    let portInput = null;
+    new Setting(containerEl)
+      .setName("Agent API 端口")
+      .setDesc("默认 43171；端口被占用时插件会自动改用一个可用端口并保存实际端口。修改后点“应用端口”重启接口生效。")
+      .addText(text => {
+        portInput = text;
+        text.setPlaceholder("43171");
+        text.setValue(String(this.plugin.settings.agentPort || 43171));
+      })
+      .addButton(button => {
+        button.setButtonText("应用端口");
+        button.onClick(async () => {
+          const port = parseInt(portInput.getValue(), 10);
+          if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+            new Notice("端口无效，请输入 1–65535 之间的数字。", 6000);
+            return;
+          }
+          this.plugin.settings.agentPort = port;
+          await this.plugin.saveSettings();
+          if (this.plugin.settings.agentApiEnabled) {
+            await this.plugin.stopAgentServer();
+            try {
+              await this.plugin.startAgentServer();
+            } catch (error) {
+              new Notice(`Agent API 启动失败：${error.message || error}`, 8000);
+            }
+          }
+          new Notice(`Agent API 端口已设为 ${this.plugin.settings.agentPort}`);
+          this.display();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("访问令牌")
+      .setDesc("Agent 调用除健康检查外的接口时必须携带此令牌。重置后旧令牌立即失效。")
+      .addText(text => {
+        text.setValue(this.plugin.settings.agentToken || "");
+        text.inputEl.setAttribute("readonly", "readonly");
+        text.inputEl.setAttribute("spellcheck", "false");
+      })
+      .addButton(button => {
+        button.setButtonText("重置访问令牌");
+        button.onClick(async () => {
+          this.plugin.settings.agentToken = crypto.randomBytes(32).toString("hex");
+          await this.plugin.saveSettings();
+          new Notice("Agent API 访问令牌已重置，旧令牌立即失效。");
+          this.display();
+        });
+      })
+      .addButton(button => {
+        button.setButtonText("复制 Agent 接入说明");
+        button.onClick(() => this.plugin.copyAgentInstructions());
+      });
+
+    containerEl.createEl("h3", { text: "更新" });
+    new Setting(containerEl)
+      .setName("启动时自动检查更新")
+      .setDesc("启动 Obsidian 时检查 GitHub Release，发现新版自动下载并覆盖插件文件。")
+      .addToggle(toggle => {
+        toggle.setValue(this.plugin.settings.autoCheckUpdates !== false);
+        toggle.onChange(async value => {
+          this.plugin.settings.autoCheckUpdates = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("更新状态")
+      .setDesc(this.plugin.getUpdateStatusText());
+
+    new Setting(containerEl)
+      .setName("检查更新")
+      .setDesc("立即从 GitHub Release 检查一次，发现新版自动下载并覆盖，完成后重载插件。")
+      .addButton(button => {
+        button.setButtonText("立即检查");
+        button.onClick(async () => {
+          button.setDisabled(true);
+          try {
+            await this.plugin.checkForUpdates({ manual: true });
+          } finally {
+            button.setDisabled(false);
+            this.display();
+          }
+        });
+      });
+  }
+}
+
 module.exports = class MacAppLauncherPlugin extends Plugin {
   async onload() {
     const loaded = await this.loadData() || {};
@@ -703,7 +826,10 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       agentToken: typeof loaded.agentToken === "string" && loaded.agentToken.length >= 32
         ? loaded.agentToken
         : crypto.randomBytes(32).toString("hex"),
-      agentApiEnabled: loaded.agentApiEnabled !== false
+      agentApiEnabled: loaded.agentApiEnabled !== false,
+      autoCheckUpdates: loaded.autoCheckUpdates !== false,
+      lastUpdateCheck: typeof loaded.lastUpdateCheck === "string" ? loaded.lastUpdateCheck : "",
+      latestVersion: typeof loaded.latestVersion === "string" ? loaded.latestVersion : ""
     };
     this.scanning = false;
     this.scanCancelled = false;
@@ -713,6 +839,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.iconJobs = new Map();
 
     this.registerView(VIEW_TYPE, leaf => new MacAppLauncherView(leaf, this));
+    this.addSettingTab(new MacAppLauncherSettingTab(this.app, this));
     this.addRibbonIcon("layout-grid", "打开 Mac 应用中心", () => this.activateView());
     this.addCommand({
       id: "open-mac-app-launcher",
@@ -732,6 +859,11 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         console.error("[Mac App Launcher] Agent API startup failed", error);
         new Notice(`Agent API 启动失败：${error.message || error}`, 8000);
       }
+    }
+    if (this.settings.autoCheckUpdates) {
+      this.checkForUpdates().catch(error => {
+        console.error("[Mac App Launcher] Auto update check failed", error);
+      });
     }
   }
 
@@ -797,6 +929,123 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.agentServer = null;
     if (server.listening) {
       await new Promise(resolve => server.close(() => resolve()));
+    }
+  }
+
+  getUpdateStatusText() {
+    const current = this.manifest.version || "未知";
+    const latest = this.settings.latestVersion || "尚未检查";
+    const last = this.settings.lastUpdateCheck
+      ? new Date(this.settings.lastUpdateCheck).toLocaleString("zh-Hans-CN")
+      : "尚未检查";
+    return `当前版本 ${current} · 最新已知版本 ${latest} · 上次检查 ${last}`;
+  }
+
+  fetchBuffer(url, redirects = 5) {
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, {
+        headers: {
+          "User-Agent": "mac-app-launcher",
+          "Accept": "application/vnd.github+json"
+        }
+      }, res => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
+          res.resume();
+          resolve(this.fetchBuffer(res.headers.location, redirects - 1));
+          return;
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        const chunks = [];
+        res.on("data", chunk => chunks.push(chunk));
+        res.on("end", () => resolve(Buffer.concat(chunks)));
+        res.on("error", reject);
+      });
+      req.on("error", reject);
+      req.setTimeout(15000, () => req.destroy(new Error("请求超时")));
+    });
+  }
+
+  compareVersions(a, b) {
+    const pa = String(a || "").replace(/^v/, "").split(".").map(n => parseInt(n, 10) || 0);
+    const pb = String(b || "").replace(/^v/, "").split(".").map(n => parseInt(n, 10) || 0);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const diff = (pa[i] || 0) - (pb[i] || 0);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async checkForUpdates({ manual = false } = {}) {
+    if (this.updateInProgress) return null;
+    this.updateInProgress = true;
+    try {
+      const buf = await this.fetchBuffer("https://api.github.com/repos/y12589/mac-app-launcher/releases/latest");
+      const release = JSON.parse(buf.toString("utf8"));
+      const latest = String(release.tag_name || "").replace(/^v/, "");
+      this.settings.latestVersion = latest;
+      this.settings.lastUpdateCheck = new Date().toISOString();
+      await this.saveSettings();
+      if (!latest || this.compareVersions(latest, this.manifest.version) <= 0) {
+        if (manual) new Notice(`Mac App Launcher 已是最新版本（${this.manifest.version}）`);
+        return null;
+      }
+      new Notice(`发现新版 ${latest}，正在自动下载并覆盖…`, 8000);
+      const ok = await this.installUpdate(latest);
+      return ok ? latest : null;
+    } catch (error) {
+      console.error("[Mac App Launcher] Update check failed", error);
+      if (manual) new Notice(`检查更新失败：${error.message || error}`, 8000);
+      return null;
+    } finally {
+      this.updateInProgress = false;
+    }
+  }
+
+  async installUpdate(version) {
+    const dir = this.getPluginDirectory();
+    const files = ["main.js", "manifest.json", "styles.css"];
+    try {
+      const downloaded = {};
+      for (const file of files) {
+        const data = await this.fetchBuffer(`https://github.com/y12589/mac-app-launcher/releases/download/${version}/${file}`);
+        if (!data || !data.length) throw new Error(`下载 ${file} 为空`);
+        downloaded[file] = data;
+      }
+      const manifest = JSON.parse(downloaded["manifest.json"].toString("utf8"));
+      if (manifest.id !== this.manifest.id) throw new Error("下载的 manifest id 不匹配，已中止更新");
+      if (String(manifest.version) !== String(version)) throw new Error("下载的 manifest 版本与 Release 不一致，已中止更新");
+      for (const file of files) {
+        const target = path.join(dir, file);
+        if (fs.existsSync(target)) fs.copyFileSync(target, `${target}.bak`);
+      }
+      for (const file of files) {
+        fs.writeFileSync(path.join(dir, file), downloaded[file]);
+      }
+      new Notice(`Mac App Launcher 已更新到 ${version}，正在重载插件…`, 8000);
+      await this.reloadSelf();
+      return true;
+    } catch (error) {
+      console.error("[Mac App Launcher] Update install failed", error);
+      new Notice(`自动更新失败：${error.message || error}。原文件已备份为 .bak，请检查插件目录。`, 8000);
+      return false;
+    }
+  }
+
+  async reloadSelf() {
+    try {
+      const plugins = this.app.plugins;
+      if (!plugins || typeof plugins.disablePlugin !== "function" || typeof plugins.enablePlugin !== "function") {
+        throw new Error("no reload api");
+      }
+      await plugins.disablePlugin(this.manifest.id);
+      await plugins.enablePlugin(this.manifest.id);
+    } catch (_) {
+      new Notice("请重启 Obsidian 以加载新版本。", 8000);
     }
   }
 
