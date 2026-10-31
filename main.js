@@ -8,9 +8,11 @@ const http = require("http");
 const https = require("https");
 
 const VIEW_TYPE = "mac-app-launcher-view";
+const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）时代
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.21.0", changes: ["配置版本化：旧配置自动备份后迁移，升级可回滚", "调试日志（可开关、可清除），一键清除使用统计与图标缓存"] },
   { version: "1.20.0", changes: ["自定义文件关联规则：扩展名绑定指定应用，右键菜单优先显示", "使用统计视图：Top 10 排行、最近启动、最近 7 天趋势"] },
   { version: "1.19.0", changes: ["画布自动执行支持命令与文件夹节点：场景导出的画布可以整条工作流一键执行"] },
   { version: "1.18.0", changes: ["场景升级为混合工作流：应用、笔记、文件夹、Obsidian 命令四种步骤有序执行", "命令白名单：只能执行亲手挑进场景的已注册命令，失效自动跳过并提示"] },
@@ -2239,6 +2241,49 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    // ── 维护：调试日志与历史清理 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "维护" });
+
+    new Setting(containerEl)
+      .setName("调试日志")
+      .setDesc("记录扫描、场景执行等关键操作到插件目录 debug.log（超 256KB 自动截断），排障时再开启。")
+      .addToggle(tg => tg.setValue(this.plugin.settings.debugLog).onChange(async v => {
+        this.plugin.settings.debugLog = v;
+        await this.plugin.saveSettings();
+      }))
+      .addButton(btn => btn.setButtonText("清除日志").onClick(() => {
+        try {
+          const file = path.join(this.plugin.pluginDirPath(), "debug.log");
+          if (fs.existsSync(file)) fs.unlinkSync(file);
+          new Notice("调试日志已清除");
+        } catch (e) { new Notice("清除失败"); }
+      }));
+
+    new Setting(containerEl)
+      .setName("清除使用统计")
+      .setDesc("把所有应用的启动次数和最近启动时间清零（不影响每日笔记里已有的日志）。")
+      .addButton(btn => btn.setButtonText("清除统计").setWarning().onClick(async () => {
+        for (const app of this.plugin.settings.apps) {
+          app.launchCount = 0;
+          app.lastLaunchedAt = 0;
+        }
+        await this.plugin.saveSettings();
+        this.plugin.refreshViews();
+        new Notice("使用统计已清零");
+      }));
+
+    new Setting(containerEl)
+      .setName("清除图标缓存")
+      .setDesc("删除已提取的应用图标，下次打开应用中心时重新生成。")
+      .addButton(btn => btn.setButtonText("清除缓存").setWarning().onClick(() => {
+        try {
+          this.plugin.iconCache.clear();
+          const dir = path.join(this.plugin.pluginDirPath(), "icons");
+          if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+          new Notice("图标缓存已清除，重开应用中心后重新生成");
+        } catch (e) { new Notice("清除失败"); }
+      }));
+
     // ── 文件关联与统计 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "文件关联与统计" });
 
@@ -2350,8 +2395,23 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
             ext: String(r.ext).replace(/^\./, "").toLowerCase(),
             appId: String(r.appId)
           }))
-        : []
+        : [],
+      schemaVersion: loaded.schemaVersion || 0,
+      debugLog: loaded.debugLog === true
     };
+    // schemaVersion 版本化迁移：旧配置先备份（data.json.vN.bak）再升级，迁移失败可手动回滚
+    if (this.settings.schemaVersion < SCHEMA_VERSION) {
+      try {
+        const dataFile = path.join(this.pluginDirPath(), "data.json");
+        if (fs.existsSync(dataFile)) {
+          fs.copyFileSync(dataFile, `${dataFile}.v${this.settings.schemaVersion || 1}.bak`);
+          console.log(`[Mac App Launcher] 旧配置已备份：data.json.v${this.settings.schemaVersion || 1}.bak`);
+        }
+        this.settings.schemaVersion = SCHEMA_VERSION;
+      } catch (error) {
+        console.error("[Mac App Launcher] 配置备份失败", error);
+      }
+    }
     this.scanning = false;
     this.scanCancelled = false;
     this.scanProgress = 0;
@@ -2424,6 +2484,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.refreshAppHotkeys();
     // 注册场景启动命令
     this.refreshSceneCommands();
+    this.debugLog(`插件加载完成 v${this.manifest.version}，应用 ${this.settings.apps.length} 个，场景 ${this.settings.scenes.length} 个`);
     // 当前笔记切换 / 标签变更时刷新推荐区
     this.registerEvent(this.app.workspace.on("file-open", () => this.refreshViews()));
     this.registerEvent(this.app.metadataCache.on("changed", debounce(() => this.refreshViews(), 500)));
@@ -2526,6 +2587,19 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // ---- 调试日志：写入插件目录 debug.log，超过 256KB 自动截断前半 ----
+  debugLog(...args) {
+    if (!this.settings || !this.settings.debugLog) return;
+    try {
+      const file = path.join(this.pluginDirPath(), "debug.log");
+      const line = `${new Date().toISOString()} ${args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}\n`;
+      if (fs.existsSync(file) && fs.statSync(file).size > 262144) {
+        fs.writeFileSync(file, fs.readFileSync(file, "utf8").slice(-131072));
+      }
+      fs.appendFileSync(file, line);
+    } catch (e) { /* 日志写入失败不影响主流程 */ }
   }
 
   // ---- 配置导入导出：跨 Vault 迁移应用、场景与分类 ----
@@ -3299,6 +3373,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.scanTotal = 0;
     this.scanStatus = "正在读取应用目录…";
     this.refreshViews();
+    this.debugLog("开始扫描应用");
     new Notice("开始快速扫描常见 Mac 应用目录…");
 
     try {
@@ -4044,6 +4119,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       new Notice(`场景「${scene.name}」里没有步骤，点「步骤」按钮添加`);
       return;
     }
+    this.debugLog(`启动场景「${scene.name}」，共 ${steps.length} 步`);
     const hasAppStep = steps.some(s => s.type === "app");
     const running = hasAppStep ? await this.getRunningBundleIds() : new Set();
     let launched = 0, opened = 0, commands = 0, skippedRunning = 0;
