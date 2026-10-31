@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.23.0", changes: ["非 macOS 平台明确提示并自动停用，不再静默失效", "下载镜像强制 https:// 协议白名单，非法镜像自动回退直连并提示"] },
   { version: "1.22.0", changes: ["性能包：应用网格分批渲染，几百个应用也不卡", "图标懒加载：滚动进视口才读取图标，管理页同样生效", "扫描与场景执行写入调试日志，方便观察耗时"] },
   { version: "1.21.0", changes: ["配置版本化：旧配置自动备份后迁移，升级可回滚", "调试日志（可开关、可清除），一键清除使用统计与图标缓存"] },
   { version: "1.20.0", changes: ["自定义文件关联规则：扩展名绑定指定应用，右键菜单优先显示", "使用统计视图：Top 10 排行、最近启动、最近 7 天趋势"] },
@@ -2383,6 +2384,12 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 
 module.exports = class MacAppLauncherPlugin extends Plugin {
   async onload() {
+    // 平台守卫：核心能力全部依赖 macOS（open/plutil/qlmanage/sips），
+    // Windows/Linux 桌面端明确提示并停用，而不是静默坏掉
+    if (process.platform !== "darwin") {
+      new Notice("Mac App Launcher 依赖 macOS 系统能力，当前平台无法使用，插件已自动停用。", 10000);
+      return;
+    }
     const loaded = await this.loadData() || {};
     const rawApps = Array.isArray(loaded.apps) ? loaded.apps : parseLegacyApps(loaded.appsText);
     // token 迁移：明文 → sha256 哈希存储；明文仅在生成的当次会话内可见
@@ -2946,9 +2953,17 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   }
 
   // 更新包下载地址：可选镜像前缀（解决国内直连 GitHub 不稳定）
+  // 协议白名单：镜像必须是 https://，否则忽略并回退直连（防明文下载被中间人替换更新包）
   releaseAssetUrl(version, file) {
     const url = `https://github.com/y12589/mac-app-launcher/releases/download/${version}/${file}`;
-    const mirror = (this.settings.downloadMirror || "").trim().replace(/\/+$/, "");
+    let mirror = (this.settings.downloadMirror || "").trim().replace(/\/+$/, "");
+    if (mirror && !/^https:\/\/[^\s/]+/i.test(mirror)) {
+      mirror = "";
+      if (!this.mirrorWarned) {
+        this.mirrorWarned = true;
+        new Notice("下载镜像必须以 https:// 开头，已回退为 GitHub 直连。请在设置页修正镜像地址。", 8000);
+      }
+    }
     return mirror ? `${mirror}/${url}` : url;
   }
 
