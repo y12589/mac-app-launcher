@@ -1436,13 +1436,29 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass("mal-settings");
 
-    containerEl.createEl("h2", { text: "Mac App Launcher 设置" });
+    // 头部：插件名 + 版本徽章
+    const header = containerEl.createDiv({ cls: "mal-settings-header" });
+    header.createEl("h2", { text: "Mac App Launcher" });
+    header.createSpan({ cls: "mal-settings-version", text: `v${this.plugin.manifest.version}` });
 
-    containerEl.createEl("h3", { text: "Agent API" });
+    // ── Agent API ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "Agent API" });
+
+    const running = !!(this.plugin.agentServer && this.plugin.agentServer.listening);
+    const statusSetting = new Setting(containerEl).setName("服务状态");
+    statusSetting.descEl.empty();
+    statusSetting.descEl.createSpan({ cls: `mal-status-dot${running ? " is-on" : ""}` });
+    statusSetting.descEl.createSpan({
+      text: running
+        ? `运行中 · 监听 127.0.0.1:${this.plugin.settings.agentPort || 43171}`
+        : "已停止 · 打开下方开关启动"
+    });
+
     new Setting(containerEl)
       .setName("启用 Agent API")
-      .setDesc("关闭后本机 127.0.0.1 的 Agent 启动接口停止服务，插件其余功能不受影响。")
+      .setDesc("关闭后本机 Agent 接口停止服务，插件其余功能不受影响。")
       .addToggle(toggle => {
         toggle.setValue(!!this.plugin.settings.agentApiEnabled);
         toggle.onChange(async value => {
@@ -1463,10 +1479,11 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 
     let portInput = null;
     new Setting(containerEl)
-      .setName("Agent API 端口")
-      .setDesc("默认 43171；端口被占用时插件会自动改用一个可用端口并保存实际端口。修改后点“应用端口”重启接口生效。")
+      .setName("监听端口")
+      .setDesc("默认 43171，被占用时自动改用可用端口。修改后点「应用端口」重启服务生效。")
       .addText(text => {
         portInput = text;
+        text.inputEl.addClass("mal-port-input");
         text.setPlaceholder("43171");
         text.setValue(String(this.plugin.settings.agentPort || 43171));
       })
@@ -1495,14 +1512,15 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("访问令牌")
-      .setDesc("Agent 调用除健康检查外的接口时必须携带此令牌。重置后旧令牌立即失效。")
+      .setDesc("调用接口（健康检查除外）须携带此令牌，重置后旧令牌立即失效。")
       .addText(text => {
+        text.inputEl.addClass("mal-token-input");
         text.setValue(this.plugin.sessionAgentToken || "（已安全存储，仅生成当次可见）");
         text.inputEl.setAttribute("readonly", "readonly");
         text.inputEl.setAttribute("spellcheck", "false");
       })
       .addButton(button => {
-        button.setButtonText("重置访问令牌");
+        button.setButtonText("重置令牌");
         button.onClick(async () => {
           const fresh = crypto.randomBytes(32).toString("hex");
           this.plugin.sessionAgentToken = fresh;
@@ -1513,11 +1531,13 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       })
       .addButton(button => {
-        button.setButtonText("复制 Agent 接入说明");
+        button.setButtonText("复制接入说明");
         button.onClick(() => this.plugin.copyAgentInstructions());
       });
 
-    containerEl.createEl("h3", { text: "更新" });
+    // ── 更新 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "更新" });
+
     new Setting(containerEl)
       .setName("启动时自动检查更新")
       .setDesc("启动 Obsidian 时检查 GitHub Release，发现新版自动下载并覆盖插件文件。")
@@ -1530,12 +1550,8 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
-      .setName("更新状态")
-      .setDesc(this.plugin.getUpdateStatusText());
-
-    new Setting(containerEl)
       .setName("检查更新")
-      .setDesc("立即从 GitHub Release 检查一次，发现新版自动下载并覆盖，完成后重载插件。")
+      .setDesc(`${this.plugin.getUpdateStatusText()}。点击立即检查一次，发现新版自动下载覆盖并重载。`)
       .addButton(button => {
         button.setButtonText("立即检查");
         button.onClick(async () => {
@@ -1549,10 +1565,12 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
-    containerEl.createEl("h3", { text: "关于" });
+    // ── 关于 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "关于" });
+
     new Setting(containerEl)
       .setName("Mac App Launcher")
-      .setDesc(`版本 ${this.plugin.manifest.version} · 作者：y12589`)
+      .setDesc("作者 y12589 · 问题与建议欢迎到 GitHub 反馈")
       .addButton(button => {
         button.setButtonText("GitHub 仓库");
         button.onClick(() => {
@@ -1564,10 +1582,7 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         button.onClick(() => {
           window.open("https://github.com/y12589/mac-app-launcher/blob/YDD/CHANGELOG.md", "_blank");
         });
-      });
-    new Setting(containerEl)
-      .setName("问题反馈")
-      .setDesc("遇到问题或有功能建议，欢迎到 GitHub Issues 提交。")
+      })
       .addButton(button => {
         button.setButtonText("提交 Issue");
         button.onClick(() => {
