@@ -1570,7 +1570,7 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Mac App Launcher")
-      .setDesc("作者 y12589 · 问题与建议欢迎到 GitHub 反馈")
+      .setDesc("作者 阎大大 · 问题与建议欢迎到 GitHub 反馈")
       .addButton(button => {
         button.setButtonText("GitHub 仓库");
         button.onClick(() => {
