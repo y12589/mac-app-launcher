@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.2", changes: ["管理应用：点应用名称或图标即可切换展示，两个勾选框各有用途提示", "完成按钮回报已选数量，未选时给出操作指引；管理列表勾选框错位修复"] },
   { version: "1.24.1", changes: ["修复：重扫应用后关联笔记、置顶顺序、单应用快捷键丢失", "修复：配置迁移备份与调试日志因目录方法缺失静默失效（schemaVersion 卡住）", "关联笔记自愈：按名称兜底命中后自动回写绑定"] },
   { version: "1.24.0", changes: ["开发者 API v2：search / getApp / scenes / isRunning 查询接口", "启动事件订阅：on(\"app-launched\" / \"scene-launched\")，第三方插件可联动", "新增 DEV-API.md 开发者文档"] },
   { version: "1.23.0", changes: ["非 macOS 平台明确提示并自动停用，不再静默失效", "下载镜像强制 https:// 协议白名单，非法镜像自动回退直连并提示"] },
@@ -853,9 +854,13 @@ class MacAppLauncherView extends ItemView {
       none.addEventListener("click", () => this.plugin.setAllSelected(false));
       const done = controls.createEl("button", { text: "完成", cls: "mal-primary" });
       done.addEventListener("click", () => {
+        const count = this.plugin.settings.apps.filter(a => a.selected).length;
         this.mode = "home";
         this.searchTerm = "";
         this.render();
+        new Notice(count
+          ? `已选择 ${count} 个应用，在应用中心展示`
+          : "还没有选择要展示的应用：在管理应用里点击应用名称或勾选「展示」框", 4000);
       });
     } else {
       const toggleView = controls.createEl("button", {
@@ -1496,26 +1501,34 @@ class MacAppLauncherView extends ItemView {
 
     for (const app of apps) {
       const row = list.createDiv({ cls: "mal-manage-row" });
-      const batchCheck = row.createEl("input", { attr: { type: "checkbox" }, cls: "mal-check mal-batch-check" });
+      const batchCheck = row.createEl("input", { attr: { type: "checkbox", title: "批量操作选择（用于批量设分类，不影响展示）" }, cls: "mal-check mal-batch-check" });
       batchCheck.checked = this.batchSelected.has(app.id);
       batchCheck.addEventListener("change", () => {
         if (batchCheck.checked) this.batchSelected.add(app.id);
         else this.batchSelected.delete(app.id);
         this.render();
       });
-      const checkbox = row.createEl("input", { attr: { type: "checkbox" }, cls: "mal-check" });
+      const checkbox = row.createEl("input", { attr: { type: "checkbox", title: "在应用中心展示此应用" }, cls: "mal-check" });
       checkbox.checked = !!app.selected;
-      checkbox.addEventListener("change", async () => {
-        app.selected = checkbox.checked;
+      const setSelected = async checked => {
+        app.selected = checked;
+        checkbox.checked = checked;
         await this.plugin.saveSettings();
         this.updateManageSummary(summary);
-        if (app.selected) await this.plugin.ensureIcon(app);
-      });
+        if (checked) await this.plugin.ensureIcon(app);
+      };
+      checkbox.addEventListener("change", () => setSelected(checkbox.checked));
 
       const icon = row.createDiv({ cls: "mal-manage-icon" });
       this.observeIcon(icon, app);
 
       const info = row.createDiv({ cls: "mal-app-info" });
+      // 点图标或名称区域也能切换「展示」，避免误点旁边的批量选择框
+      for (const el of [icon, info]) {
+        el.style.cursor = "pointer";
+        el.title = "点击切换：在应用中心展示 / 隐藏";
+        el.addEventListener("click", () => setSelected(!app.selected));
+      }
       info.createEl("div", { text: app.name, cls: "mal-manage-name" });
       info.createEl("div", { text: app.path, cls: "mal-app-path" });
 
