@@ -9,6 +9,9 @@
 .mal-category-nav{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 22px;padding:2px 0 8px}
 .mal-nav-chip{border:1px solid var(--background-modifier-border);border-radius:999px;padding:7px 13px;background:var(--background-secondary);color:var(--text-muted);font-size:var(--font-smaller);white-space:nowrap}
 .mal-nav-chip:hover{border-color:var(--interactive-accent);color:var(--text-normal)}
+.mal-nav-chip[draggable="true"]{cursor:grab}
+.mal-nav-chip.is-dragging{opacity:.35}
+.mal-nav-chip.is-drop-target{border:1px dashed var(--interactive-accent);color:var(--text-normal)}
 .mal-nav-chip.is-active{background:var(--interactive-accent);border-color:var(--interactive-accent);color:var(--text-on-accent)}
 .mal-section{margin:0 0 26px}
 .mal-category{margin:0 0 12px;font-size:1em;font-weight:650;color:var(--text-muted)}

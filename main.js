@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.4", changes: ["分类拖拽排序：首页分类芯片按住拖动即可换位，插到目标分类之前", "排序全局生效：首页分区、管理列表、分类管理面板同一套顺序"] },
   { version: "1.24.3", changes: ["管理列表按「分类管理」的排序规则分组排列，同分类内按名称排序", "批量选择默认收起：点工具条「批量操作」才出现勾选框与操作条"] },
   { version: "1.24.2", changes: ["管理应用：点应用名称或图标即可切换展示，两个勾选框各有用途提示", "完成按钮回报已选数量，未选时给出操作指引；管理列表勾选框错位修复"] },
   { version: "1.24.1", changes: ["修复：重扫应用后关联笔记、置顶顺序、单应用快捷键丢失", "修复：配置迁移备份与调试日志因目录方法缺失静默失效（schemaVersion 卡住）", "关联笔记自愈：按名称兜底命中后自动回写绑定"] },
@@ -1077,6 +1078,17 @@ class MacAppLauncherView extends ItemView {
         this.detailAppId = null;
         this.render();
       });
+      // 分类芯片本身可拖拽：左右换位即调整分类顺序
+      if (item.id !== "__all__") {
+        button.setAttribute("draggable", "true");
+        button.title = "点击筛选；按住拖动可调整分类顺序";
+        button.addEventListener("dragstart", event => {
+          event.dataTransfer.setData("application/x-mal-category", item.id);
+          event.dataTransfer.effectAllowed = "move";
+          button.addClass("is-dragging");
+        });
+        button.addEventListener("dragend", () => button.removeClass("is-dragging"));
+      }
       button.addEventListener("dragover", event => {
         if (item.id === "__all__") return;
         event.preventDefault();
@@ -1088,6 +1100,15 @@ class MacAppLauncherView extends ItemView {
         if (item.id === "__all__") return;
         event.preventDefault();
         button.removeClass("is-drop-target");
+        // 优先识别分类拖拽：拖到哪个芯片前就插到哪个分类前
+        const draggedCategory = event.dataTransfer.getData("application/x-mal-category");
+        if (draggedCategory) {
+          if (draggedCategory !== item.id) {
+            await this.plugin.reorderCategory(draggedCategory, item.id);
+            new Notice(`已将分类「${draggedCategory}」移到「${item.id}」之前`);
+          }
+          return;
+        }
         const sourceId = event.dataTransfer.getData("text/plain");
         const app = this.plugin.settings.apps.find(entry => entry.id === sourceId);
         if (!app) return;
@@ -4236,6 +4257,20 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     await this.saveSettings();
     this.refreshViews();
     return { ok: true };
+  }
+
+  // 分类拖拽排序：把 name 插到 beforeName 前面，重排 order 后持久化
+  async reorderCategory(name, beforeName) {
+    const cats = [...this.settings.categories].sort((a, b) => a.order - b.order);
+    const from = cats.findIndex(c => c.name === name);
+    if (from < 0 || !cats.some(c => c.name === beforeName)) return;
+    const [moved] = cats.splice(from, 1);
+    const insertAt = cats.findIndex(c => c.name === beforeName);
+    cats.splice(insertAt, 0, moved);
+    cats.forEach((c, i) => { c.order = i; });
+    this.settings.categories = cats;
+    await this.saveSettings();
+    this.refreshViews();
   }
 
   async moveCategory(name, dir) {
