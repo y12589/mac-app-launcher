@@ -20,6 +20,7 @@
 .mal-grid.is-compact:not(.is-list) .mal-native-icon{width:36px;height:36px}
 .mal-grid.is-compact:not(.is-list) .mal-fallback-icon{font-size:24px}
 .mal-grid.is-compact:not(.is-list) .mal-app-name{display:none}
+.mal-grid.is-compact:not(.is-list) .mal-pin-btn{display:none}
 .mal-nav-chip.is-active{background:var(--interactive-accent);border-color:var(--interactive-accent);color:var(--text-on-accent)}
 .mal-section{margin:0 0 26px}
 .mal-category{margin:0 0 12px;font-size:1em;font-weight:650;color:var(--text-muted)}
