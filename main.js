@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.7", changes: ["最近启动条只显示图标（隐藏名称，固定小方格）", "头部新增 ↻ 重载插件按钮，一键禁用再启用，不必重启 Obsidian"] },
   { version: "1.24.6", changes: ["最近启动条改为紧凑小图标样式，与下方分类网格视觉区分"] },
   { version: "1.24.5", changes: ["修复：自定义分类未登记进分类表导致拖拽排序静默失效，启动时自动补登", "分类芯片拖到导航空白处可排到末尾；新设分类自动进入分类管理面板"] },
   { version: "1.24.4", changes: ["分类拖拽排序：首页分类芯片按住拖动即可换位，插到目标分类之前", "排序全局生效：首页分区、管理列表、分类管理面板同一套顺序"] },
@@ -882,6 +883,17 @@ class MacAppLauncherView extends ItemView {
         this.mode = "manage";
         this.searchTerm = "";
         this.render();
+      });
+      const reload = controls.createEl("button", {
+        text: "↻",
+        cls: "mal-button",
+        attr: { title: "重载插件（不必重启 Obsidian）" }
+      });
+      reload.addEventListener("click", async () => {
+        new Notice("正在重载 Mac App Launcher…");
+        const pluginId = this.plugin.manifest.id;
+        await this.app.plugins.disablePlugin(pluginId);
+        await this.app.plugins.enablePlugin(pluginId);
       });
     }
 
