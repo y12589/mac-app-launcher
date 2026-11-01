@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.6", changes: ["最近启动条改为紧凑小图标样式，与下方分类网格视觉区分"] },
   { version: "1.24.5", changes: ["修复：自定义分类未登记进分类表导致拖拽排序静默失效，启动时自动补登", "分类芯片拖到导航空白处可排到末尾；新设分类自动进入分类管理面板"] },
   { version: "1.24.4", changes: ["分类拖拽排序：首页分类芯片按住拖动即可换位，插到目标分类之前", "排序全局生效：首页分区、管理列表、分类管理面板同一套顺序"] },
   { version: "1.24.3", changes: ["管理列表按「分类管理」的排序规则分组排列，同分类内按名称排序", "批量选择默认收起：点工具条「批量操作」才出现勾选框与操作条"] },
@@ -1039,7 +1040,7 @@ class MacAppLauncherView extends ItemView {
           .filter(app => app.lastLaunchedAt)
           .sort((a, b) => (b.lastLaunchedAt || 0) - (a.lastLaunchedAt || 0))
           .slice(0, 8);
-        if (recent.length) this.renderAppSection(body, "最近启动", recent, "🕘", true);
+        if (recent.length) this.renderAppSection(body, "最近启动", recent, "🕘", true, true);
       }
       const pinned = filteredSearch.filter(app => app.pinned);
       if (pinned.length) this.renderAppSection(body, "常用应用", pinned);
@@ -1134,14 +1135,14 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
-  renderAppSection(body, title, apps, iconOverride, keepOrder) {
+  renderAppSection(body, title, apps, iconOverride, keepOrder, compact) {
     const isPinnedStrip = apps.length > 0 && apps.every(app => app.pinned);
     const section = body.createDiv({ cls: isPinnedStrip ? "mal-pinned-top" : "mal-section" });
     if (title) {
       const icon = iconOverride || this.plugin.categoryIcon(title);
       section.createEl("h3", { text: `${icon ? icon + " " : ""}${title}`, cls: "mal-category" });
     }
-    const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
+    const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""} ${compact ? "is-compact" : ""}` });
     const sorted = keepOrder ? [...apps] : [...apps].sort((a, b) => {
       const aKey = a.pinned ? (a.pinnedOrder ?? a.order ?? 0) : (a.order ?? 0);
       const bKey = b.pinned ? (b.pinnedOrder ?? b.order ?? 0) : (b.order ?? 0);
