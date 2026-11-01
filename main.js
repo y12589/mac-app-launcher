@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.5", changes: ["修复：自定义分类未登记进分类表导致拖拽排序静默失效，启动时自动补登", "分类芯片拖到导航空白处可排到末尾；新设分类自动进入分类管理面板"] },
   { version: "1.24.4", changes: ["分类拖拽排序：首页分类芯片按住拖动即可换位，插到目标分类之前", "排序全局生效：首页分区、管理列表、分类管理面板同一套顺序"] },
   { version: "1.24.3", changes: ["管理列表按「分类管理」的排序规则分组排列，同分类内按名称排序", "批量选择默认收起：点工具条「批量操作」才出现勾选框与操作条"] },
   { version: "1.24.2", changes: ["管理应用：点应用名称或图标即可切换展示，两个勾选框各有用途提示", "完成按钮回报已选数量，未选时给出操作指引；管理列表勾选框错位修复"] },
@@ -1119,6 +1120,18 @@ class MacAppLauncherView extends ItemView {
         new Notice(`已将 ${app.name} 移入「${item.id}」`);
       });
     }
+    // 把分类芯片拖到导航条空白处 = 排到末尾
+    nav.addEventListener("dragover", event => {
+      if (event.target === nav) event.preventDefault();
+    });
+    nav.addEventListener("drop", async event => {
+      if (event.target !== nav) return;
+      const draggedCategory = event.dataTransfer.getData("application/x-mal-category");
+      if (!draggedCategory) return;
+      event.preventDefault();
+      await this.plugin.reorderCategory(draggedCategory, null);
+      new Notice(`已将分类「${draggedCategory}」排到末尾`);
+    });
   }
 
   renderAppSection(body, title, apps, iconOverride, keepOrder) {
@@ -1523,6 +1536,7 @@ class MacAppLauncherView extends ItemView {
             changed++;
           }
         }
+        this.plugin.ensureCategoryEntry(category);
         await this.plugin.saveSettings();
         new Notice(`已将 ${changed} 个应用分类为：${category}`);
         this.batchSelected.clear();
@@ -1581,6 +1595,7 @@ class MacAppLauncherView extends ItemView {
       categoryInput.value = app.category || "未分类";
       categoryInput.addEventListener("change", async () => {
         app.category = categoryInput.value.trim() || "未分类";
+        this.plugin.ensureCategoryEntry(app.category);
         this.plugin.learnCategory(app);
         await this.plugin.saveSettings();
         new Notice(`已将 ${app.name} 分类为：${app.category}`);
@@ -2518,6 +2533,12 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       }
       // 无论备份是否成功都推进版本号，避免备份失败导致每次启动重复尝试
       this.settings.schemaVersion = SCHEMA_VERSION;
+    }
+    // 补登「应用在用在、但分类表里没有」的分类，排序、拖拽与管理面板才能识别
+    {
+      const before = this.settings.categories.length;
+      for (const app of this.settings.apps) this.ensureCategoryEntry(app.category);
+      if (this.settings.categories.length > before) await this.saveSettings();
     }
     this.scanning = false;
     this.scanCancelled = false;
@@ -4259,13 +4280,25 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     return { ok: true };
   }
 
-  // 分类拖拽排序：把 name 插到 beforeName 前面，重排 order 后持久化
+  // 补登「应用在用在、但分类表里没有」的分类，排序与管理面板才能识别它
+  ensureCategoryEntry(name, icon = "📁") {
+    const trimmed = (name || "").trim();
+    if (!trimmed || trimmed === "未分类") return;
+    if (this.settings.categories.some(c => c.name === trimmed)) return;
+    const maxOrder = Math.max(-1, ...this.settings.categories.map(c => Number(c.order) || 0));
+    this.settings.categories.push({ name: trimmed, icon, order: maxOrder + 1 });
+  }
+
+  // 分类拖拽排序：把 name 插到 beforeName 前面（beforeName 为 null 时排到末尾），重排 order 后持久化
   async reorderCategory(name, beforeName) {
+    this.ensureCategoryEntry(name);
+    if (beforeName) this.ensureCategoryEntry(beforeName);
     const cats = [...this.settings.categories].sort((a, b) => a.order - b.order);
     const from = cats.findIndex(c => c.name === name);
-    if (from < 0 || !cats.some(c => c.name === beforeName)) return;
+    if (from < 0) return;
     const [moved] = cats.splice(from, 1);
-    const insertAt = cats.findIndex(c => c.name === beforeName);
+    const insertAt = beforeName ? cats.findIndex(c => c.name === beforeName) : cats.length;
+    if (insertAt < 0) return;
     cats.splice(insertAt, 0, moved);
     cats.forEach((c, i) => { c.order = i; });
     this.settings.categories = cats;
