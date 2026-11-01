@@ -32,7 +32,8 @@
 .mal-progress-count{text-align:right;font-variant-numeric:tabular-nums}
 .mal-manage-summary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 14px;font-size:var(--font-smaller)}
 .mal-manage-list{display:flex;flex-direction:column;gap:7px}
-.mal-manage-row{display:grid;grid-template-columns:24px 24px 42px minmax(120px,1fr) minmax(190px,270px);align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:11px;background:var(--background-secondary)}
+.mal-manage-row{display:grid;grid-template-columns:24px 42px minmax(120px,1fr) minmax(190px,270px);align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:11px;background:var(--background-secondary)}
+.mal-manage-row.is-batch{grid-template-columns:24px 24px 42px minmax(120px,1fr) minmax(190px,270px)}
 .mal-check{width:17px;height:17px}
 .mal-manage-icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
 .mal-manage-icon .mal-native-icon{width:38px;height:38px}
@@ -98,7 +99,7 @@
 .mal-detail-edit-actions{display:flex;gap:8px;margin-top:12px}
 .mal-detail-footer{display:flex;justify-content:flex-end;margin-top:22px;padding-top:16px;border-top:1px solid var(--background-modifier-border)}
 .mal-launch-button{min-width:160px;background:var(--interactive-accent);color:var(--text-on-accent);border-color:var(--interactive-accent);font-weight:700}
-@media(max-width:650px){.mal-view{padding:12px}.mal-grid{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}.mal-manage-row{grid-template-columns:22px 22px 36px minmax(90px,1fr);gap:8px}.mal-manage-tools{grid-column:4}.mal-detail-backdrop{padding:8px}.mal-detail-panel{padding:16px}}
+@media(max-width:650px){.mal-view{padding:12px}.mal-grid{grid-template-columns:repeat(auto-fill,minmax(92px,1fr))}.mal-manage-row{grid-template-columns:22px 36px minmax(90px,1fr);gap:8px}.mal-manage-row.is-batch{grid-template-columns:22px 22px 36px minmax(90px,1fr)}.mal-manage-tools{grid-column:3}.mal-manage-row.is-batch .mal-manage-tools{grid-column:4}.mal-detail-backdrop{padding:8px}.mal-detail-panel{padding:16px}}
 
 .mal-pinned-top{margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid var(--background-modifier-border)}
 

@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.3", changes: ["管理列表按「分类管理」的排序规则分组排列，同分类内按名称排序", "批量选择默认收起：点工具条「批量操作」才出现勾选框与操作条"] },
   { version: "1.24.2", changes: ["管理应用：点应用名称或图标即可切换展示，两个勾选框各有用途提示", "完成按钮回报已选数量，未选时给出操作指引；管理列表勾选框错位修复"] },
   { version: "1.24.1", changes: ["修复：重扫应用后关联笔记、置顶顺序、单应用快捷键丢失", "修复：配置迁移备份与调试日志因目录方法缺失静默失效（schemaVersion 卡住）", "关联笔记自愈：按名称兜底命中后自动回写绑定"] },
   { version: "1.24.0", changes: ["开发者 API v2：search / getApp / scenes / isRunning 查询接口", "启动事件订阅：on(\"app-launched\" / \"scene-launched\")，第三方插件可联动", "新增 DEV-API.md 开发者文档"] },
@@ -1415,6 +1416,12 @@ class MacAppLauncherView extends ItemView {
     if (this.showUncategorizedOnly) {
       apps = apps.filter(app => !app.category || app.category === "未分类");
     }
+    // 管理列表按「分类管理」里的排序规则分组排列，同分类内按名称排序
+    const catOrder = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
+    apps.sort((a, b) =>
+      (catOrder.get(a.category || "未分类") ?? 999) - (catOrder.get(b.category || "未分类") ?? 999) ||
+      a.name.localeCompare(b.name, "zh-Hans-CN")
+    );
 
     const summary = body.createDiv({ cls: "mal-manage-summary" });
     this.updateManageSummary(summary);
@@ -1445,6 +1452,15 @@ class MacAppLauncherView extends ItemView {
       this.showSceneManager = !this.showSceneManager;
       this.render();
     });
+    const batchBtn = toolbar.createEl("button", {
+      text: this.batchMode ? "退出批量操作" : "批量操作",
+      cls: this.batchMode ? "mal-primary" : "mal-button"
+    });
+    batchBtn.addEventListener("click", () => {
+      this.batchMode = !this.batchMode;
+      if (!this.batchMode && this.batchSelected) this.batchSelected.clear();
+      this.render();
+    });
 
     if (this.showCategoryManager) this.renderCategoryManager(body);
     if (this.showSceneManager) this.renderSceneManager(body);
@@ -1463,8 +1479,9 @@ class MacAppLauncherView extends ItemView {
     const categories = new Set([...this.plugin.getCategories().map(c => c.name), ...this.plugin.settings.apps.map(a => a.category).filter(Boolean)]);
     for (const category of categories) datalist.createEl("option", { attr: { value: category } });
 
-    // 批量操作条
+    // 批量操作条：点「批量操作」后才出现，平时不占位、不误导
     if (!this.batchSelected) this.batchSelected = new Set();
+    if (this.batchMode) {
     const batchBar = list.createDiv({ cls: "mal-batch-bar" });
     const selectedCount = this.batchSelected.size;
     if (selectedCount > 0) {
@@ -1496,11 +1513,13 @@ class MacAppLauncherView extends ItemView {
         this.render();
       });
     } else {
-      batchBar.createEl("span", { text: "勾选左侧复选框可批量设置分类", cls: "mal-batch-hint" });
+      batchBar.createEl("span", { text: "勾选行首复选框可批量设置分类", cls: "mal-batch-hint" });
+    }
     }
 
     for (const app of apps) {
-      const row = list.createDiv({ cls: "mal-manage-row" });
+      const row = list.createDiv({ cls: this.batchMode ? "mal-manage-row is-batch" : "mal-manage-row" });
+      if (this.batchMode) {
       const batchCheck = row.createEl("input", { attr: { type: "checkbox", title: "批量操作选择（用于批量设分类，不影响展示）" }, cls: "mal-check mal-batch-check" });
       batchCheck.checked = this.batchSelected.has(app.id);
       batchCheck.addEventListener("change", () => {
@@ -1508,6 +1527,7 @@ class MacAppLauncherView extends ItemView {
         else this.batchSelected.delete(app.id);
         this.render();
       });
+      }
       const checkbox = row.createEl("input", { attr: { type: "checkbox", title: "在应用中心展示此应用" }, cls: "mal-check" });
       checkbox.checked = !!app.selected;
       const setSelected = async checked => {
