@@ -12,6 +12,8 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.24.11", changes: ["手动添加应用改为原生选择器：点「选择应用…」在 Finder 里挑 .app，选完自动填路径，不必手动输入"] },
+  { version: "1.24.10", changes: ["紧急修复：自动更新误判导致「下载→覆盖→重载」死循环，版本比较改读磁盘 manifest（1.24.9 打包时被循环覆盖，已作废）"] },
   { version: "1.24.8", changes: ["最近启动条隐藏置顶星标，图标条更干净"] },
   { version: "1.24.7", changes: ["最近启动条只显示图标（隐藏名称，固定小方格）", "头部新增 ↻ 重载插件按钮，一键禁用再启用，不必重启 Obsidian"] },
   { version: "1.24.6", changes: ["最近启动条改为紧凑小图标样式，与下方分类网格视觉区分"] },
@@ -1723,13 +1725,25 @@ class MacAppLauncherView extends ItemView {
     const panel = body.createDiv({ cls: "mal-add-custom" });
     panel.createEl("h3", { text: "手动添加应用" });
     panel.createEl("p", {
-      text: "添加扫描不到的应用（如 Parallels 虚拟机应用、自编译应用），支持 ~ 开头的路径。",
+      text: "添加扫描不到的应用（如 Parallels 虚拟机应用、自编译应用）。点击「选择应用…」在 Finder 里挑 .app，选中后自动填入路径。",
       cls: "mal-add-custom-hint"
     });
     const row = panel.createDiv({ cls: "mal-add-custom-row" });
     const pathInput = row.createEl("input", {
       cls: "mal-category-input mal-add-path",
-      attr: { type: "text", placeholder: "应用路径，如 ~/Applications/MyApp.app", spellcheck: "false" }
+      attr: { type: "text", placeholder: "点左侧「选择应用…」挑选，或粘贴路径", spellcheck: "false" }
+    });
+    const pickBtn = row.createEl("button", { text: "选择应用…", cls: "mal-button" });
+    pickBtn.addEventListener("click", async () => {
+      pickBtn.setAttr("disabled", "true");
+      try {
+        const picked = await this.plugin.pickAppBundle();
+        if (picked) pathInput.value = picked;
+      } catch (error) {
+        new Notice(`选择应用失败：${error.message || error}`, 6000);
+      } finally {
+        pickBtn.removeAttribute("disabled");
+      }
     });
     const catInput = row.createEl("input", {
       cls: "mal-category-input mal-add-category",
@@ -3182,8 +3196,15 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       this.settings.latestVersion = latest;
       this.settings.lastUpdateCheck = new Date().toISOString();
       await this.saveSettings();
-      if (!latest || this.compareVersions(latest, this.manifest.version) <= 0) {
-        if (manual) new Notice(`Mac App Launcher 已是最新版本（${this.manifest.version}）`);
+      // 当前版本必须读磁盘 manifest：Obsidian 缓存的 this.manifest 可能落后于磁盘文件，
+      // 用缓存版比较会永远误判「有新版」，陷入下载→覆盖→重载→再下载的死循环
+      let currentVersion = this.manifest.version;
+      try {
+        const diskManifest = JSON.parse(fs.readFileSync(path.join(this.getPluginDirectory(), "manifest.json"), "utf8"));
+        if (diskManifest && diskManifest.version) currentVersion = String(diskManifest.version);
+      } catch (e) { /* 读不到就退回缓存版本 */ }
+      if (!latest || this.compareVersions(latest, currentVersion) <= 0) {
+        if (manual) new Notice(`Mac App Launcher 已是最新版本（${currentVersion}）`);
         return null;
       }
       new Notice(`发现新版 ${latest}，正在自动下载并覆盖…`, 8000);
@@ -4191,6 +4212,21 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.settings.apps = this.settings.apps.filter(item => item.id !== app.id);
     await this.saveSettings();
     this.refreshViews();
+  }
+
+  // 用 macOS 原生选择面板挑 .app，选完直接拿到路径（取消时返回空串）
+  async pickAppBundle() {
+    try {
+      const out = await execFileAsync("osascript", [
+        "-e", 'choose file with prompt "选择要添加的应用（.app）" of type {"com.apple.application-bundle"}',
+        "-e", "return POSIX path of result"
+      ]);
+      return String(out || "").trim();
+    } catch (error) {
+      const text = `${(error && error.stderr) || ""}${(error && error.message) || ""}`;
+      if (text.includes("-128")) return "";
+      throw error;
+    }
   }
 
   // 手动添加应用：支持任意路径的 .app（Parallels、自编译等扫描不到的应用）
