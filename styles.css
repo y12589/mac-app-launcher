@@ -236,3 +236,42 @@
 .mal-stats-bar{height:100%;border-radius:5px;background:var(--interactive-accent)}
 .mal-stats-bar.is-trend{background:var(--color-green, #4caf50)}
 .mal-stats-count{min-width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted);font-size:var(--font-smaller)}
+
+/* 首页仪表条：万年历 + 今日天气 */
+.mal-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:0 0 22px}
+.mal-dash-card{padding:14px 17px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary);min-height:100px;display:flex;flex-direction:column;justify-content:center}
+.mal-dash-label{font-size:10px;letter-spacing:2px;color:var(--text-faint);margin-bottom:6px}
+.mal-dash-solar{font-size:1.28em;font-weight:650;letter-spacing:.3px;color:var(--text-normal)}
+.mal-dash-week{margin-top:2px;color:var(--text-muted);font-size:var(--font-smaller)}
+.mal-dash-lunar{margin-top:7px;font-size:var(--font-ui-small);color:var(--text-normal)}
+.mal-dash-tip{margin-top:5px;color:var(--text-warning);font-size:var(--font-smaller)}
+.mal-dash-weather-body{display:flex;align-items:center;gap:13px;margin-top:2px}
+.mal-dash-weather-icon{font-size:32px;line-height:1;flex:0 0 auto}
+.mal-dash-weather-text{min-width:0}
+.mal-dash-temp{font-size:1.32em;font-weight:650;line-height:1.2}
+.mal-dash-desc{color:var(--text-muted);font-size:var(--font-smaller)}
+.mal-dash-daytype{align-self:flex-start;margin-top:7px;padding:2px 9px;border:1px solid var(--background-modifier-border);border-radius:999px;background:var(--background-primary);font-size:var(--font-smaller);color:var(--text-muted)}
+.mal-dash-daytype.is-rest{color:var(--text-success, #2f9e78);border-color:color-mix(in srgb,var(--interactive-accent) 40%,transparent)}
+.mal-dash-daytype.is-work{color:var(--text-normal)}
+
+/* 活跃月历 */
+.mal-cal-card{margin:0 0 26px;padding:14px 16px 12px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary)}
+.mal-cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.mal-cal-title{font-weight:650;color:var(--text-normal)}
+.mal-cal-nav{display:flex;align-items:center;gap:4px}
+.mal-cal-nav-btn{padding:2px 9px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font-size:18px;line-height:1;cursor:pointer}
+.mal-cal-nav-btn:hover{background:var(--background-modifier-hover);color:var(--text-accent)}
+.mal-cal-label{min-width:88px;text-align:center;font-size:var(--font-smaller);color:var(--text-muted)}
+.mal-cal-weeks,.mal-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.mal-cal-weeks{margin-bottom:4px}
+.mal-cal-week-name{padding-bottom:2px;text-align:center;font-size:10px;color:var(--text-faint)}
+.mal-cal-cell{display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:6px;background:var(--background-primary);font-size:var(--font-smaller);color:var(--text-muted)}
+.mal-cal-cell.is-empty{background:transparent}
+.mal-cal-cell.is-weekend{color:var(--text-faint)}
+.mal-cal-cell.is-today{outline:2px solid var(--interactive-accent);font-weight:700;color:var(--text-normal)}
+.mal-cal-l1{background:color-mix(in srgb,var(--interactive-accent) 16%,transparent)}
+.mal-cal-l2{background:color-mix(in srgb,var(--interactive-accent) 34%,transparent);color:var(--text-normal)}
+.mal-cal-l3{background:color-mix(in srgb,var(--interactive-accent) 52%,transparent);color:var(--text-normal)}
+.mal-cal-l4{background:color-mix(in srgb,var(--interactive-accent) 70%,transparent);color:var(--text-on-accent)}
+.mal-cal-total{margin-top:8px;text-align:right;font-size:var(--font-smaller);color:var(--text-faint)}
+@media(max-width:650px){.mal-dash{grid-template-columns:1fr}}

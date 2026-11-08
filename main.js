@@ -1,4 +1,4 @@
-const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu, Modal, TFile, TFolder } = require("obsidian");
+const { Plugin, ItemView, Notice, PluginSettingTab, Setting, Menu, Modal, TFile, TFolder, requestUrl } = require("obsidian");
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.25.0", changes: ["首页新增万年历：公历、星期、农历干支生肖、节日，并显示今日上班/休息（按法定节假日与调休安排）", "新增今日天气：简单显示温度与天气，位置可留空自动定位或指定城市，缓存 30 分钟", "新增活跃月历：按天统计应用启动次数的热力图，可前后翻月查看"] },
   { version: "1.24.11", changes: ["手动添加应用改为原生选择器：点「选择应用…」在 Finder 里挑 .app，选完自动填路径，不必手动输入"] },
   { version: "1.24.10", changes: ["紧急修复：自动更新误判导致「下载→覆盖→重载」死循环，版本比较改读磁盘 manifest（1.24.9 打包时被循环覆盖，已作废）"] },
   { version: "1.24.8", changes: ["最近启动条隐藏置顶星标，图标条更干净"] },
@@ -211,6 +212,77 @@ function fuzzySearchApps(apps, query) {
   }
   results.sort((a, b) => b.score - a.score);
   return results;
+}
+
+// ---- 首页仪表条：万年历（公历 + 农历 + 节日 + 节气） ----
+const LUNAR_MONTH_NAMES = { "正月": 1, "一月": 1, "二月": 2, "三月": 3, "四月": 4, "五月": 5, "六月": 6, "七月": 7, "八月": 8, "九月": 9, "十月": 10, "十一月": 11, "冬月": 11, "十二月": 12, "腊月": 12 };
+const LUNAR_DAY_NAMES = ["初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"];
+const ZODIAC_BY_BRANCH = { "子": "鼠", "丑": "牛", "寅": "虎", "卯": "兔", "辰": "龙", "巳": "蛇", "午": "马", "未": "羊", "申": "猴", "酉": "鸡", "戌": "狗", "亥": "猪" };
+const WEEKDAY_NAMES = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+const SOLAR_FESTIVALS = { "1-1": "元旦", "2-14": "情人节", "3-8": "妇女节", "4-1": "愚人节", "5-1": "劳动节", "5-4": "青年节", "6-1": "儿童节", "9-10": "教师节", "10-1": "国庆节", "12-25": "圣诞节" };
+const LUNAR_FESTIVALS = { "1-1": "春节", "1-15": "元宵节", "2-2": "龙抬头", "5-5": "端午节", "7-7": "七夕", "8-15": "中秋节", "9-9": "重阳节", "12-8": "腊八节", "12-23": "小年" };
+
+function lunarMonthNumber(monthName) {
+  if (!monthName) return 0;
+  const clean = String(monthName).replace(/^闰/, "");
+  return LUNAR_MONTH_NAMES[clean] || 0;
+}
+
+function dateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function getCalendarInfo(date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const info = {
+    solar: `${year}年${month}月${day}日`,
+    week: WEEKDAY_NAMES[date.getDay()],
+    lunar: "",
+    festival: SOLAR_FESTIVALS[`${month}-${day}`] || ""
+  };
+  try {
+    const parts = new Intl.DateTimeFormat("zh-CN-u-ca-chinese", { year: "numeric", month: "long", day: "numeric" })
+      .formatToParts(date);
+    const get = type => (parts.find(p => p.type === type) || {}).value || "";
+    const yearName = get("yearName"); // 干支，如 丙午
+    const monthName = get("month"); // 农历月，如 九月 / 闰九月
+    const dayValue = Number(get("day")) || 0;
+    const zodiac = ZODIAC_BY_BRANCH[yearName ? yearName.charAt(1) : ""] || "";
+    const lunarMonth = lunarMonthNumber(monthName);
+    const dayLabel = LUNAR_DAY_NAMES[dayValue - 1] || String(dayValue);
+    const prefix = yearName ? `${yearName}年${zodiac ? "（" + zodiac + "）" : ""}` : "";
+    info.lunar = `${prefix}${monthName}${dayLabel}`;
+    if (!monthName.startsWith("闰")) {
+      const lunarFestival = LUNAR_FESTIVALS[`${lunarMonth}-${dayValue}`];
+      if (lunarFestival) info.festival = info.festival ? `${info.festival} · ${lunarFestival}` : lunarFestival;
+    }
+  } catch (error) {
+    info.lunar = "";
+  }
+  return info;
+}
+
+// ---- 今日天气：Open-Meteo（免密钥、仅用坐标，不传任何本地数据） ----
+const WMO_WEATHER = {
+  0: { text: "晴", icon: "☀️" }, 1: { text: "大部晴朗", icon: "🌤" }, 2: { text: "多云", icon: "⛅" }, 3: { text: "阴", icon: "☁️" },
+  45: { text: "雾", icon: "🌫" }, 48: { text: "雾凇", icon: "🌫" },
+  51: { text: "毛毛雨", icon: "🌦" }, 53: { text: "小雨", icon: "🌦" }, 55: { text: "中雨", icon: "🌧" },
+  56: { text: "冻雨", icon: "🌧" }, 57: { text: "冻雨", icon: "🌧" },
+  61: { text: "小雨", icon: "🌧" }, 63: { text: "中雨", icon: "🌧" }, 65: { text: "大雨", icon: "🌧" },
+  66: { text: "冻雨", icon: "🌧" }, 67: { text: "冻雨", icon: "🌧" },
+  71: { text: "小雪", icon: "🌨" }, 73: { text: "中雪", icon: "🌨" }, 75: { text: "大雪", icon: "❄️" }, 77: { text: "雪粒", icon: "🌨" },
+  80: { text: "阵雨", icon: "🌦" }, 81: { text: "阵雨", icon: "🌦" }, 82: { text: "强阵雨", icon: "⛈" },
+  85: { text: "阵雪", icon: "🌨" }, 86: { text: "强阵雪", icon: "❄️" },
+  95: { text: "雷阵雨", icon: "⛈" }, 96: { text: "雷雨伴冰雹", icon: "⛈" }, 99: { text: "雷雨伴冰雹", icon: "⛈" }
+};
+
+function weatherCodeInfo(code) {
+  return WMO_WEATHER[Number(code)] || { text: "未知", icon: "🌡" };
 }
 
 // ---- 场景步骤：应用 / 笔记 / 文件夹 / Obsidian 命令 ----
@@ -916,6 +988,115 @@ class MacAppLauncherView extends ItemView {
     else this.renderHome(body, term);
   }
 
+  // 首页仪表条：万年历 + 今日天气（天气异步加载，不阻塞应用列表渲染）
+  renderDashboard(body) {
+    if (this.plugin.settings.showDashboard === false) return;
+    const dash = body.createDiv({ cls: "mal-dash" });
+
+    const info = getCalendarInfo(new Date());
+    const cal = dash.createDiv({ cls: "mal-dash-card mal-dash-cal" });
+    cal.createDiv({ cls: "mal-dash-label", text: "万年历" });
+    cal.createDiv({ cls: "mal-dash-solar", text: info.solar });
+    cal.createDiv({ cls: "mal-dash-week", text: info.week });
+    if (info.lunar) cal.createDiv({ cls: "mal-dash-lunar", text: `农历 ${info.lunar}` });
+    if (info.festival) cal.createDiv({ cls: "mal-dash-tip", text: info.festival });
+
+    // 今日上班 / 休息：按官方节假日与调休安排（异步拉取，失败时按周末判断）
+    const dayTypeEl = cal.createDiv({ cls: "mal-dash-daytype", text: "…" });
+    this.plugin.getHolidayInfo(new Date()).then(h => {
+      if (!dayTypeEl.isConnected || !h) return;
+      dayTypeEl.setText(h.label);
+      dayTypeEl.addClass(h.rest ? "is-rest" : "is-work");
+      dayTypeEl.setAttribute("title", h.detail || h.label);
+    });
+
+    const wx = dash.createDiv({ cls: "mal-dash-card mal-dash-weather" });
+    wx.createDiv({ cls: "mal-dash-label", text: "今日天气" });
+    const wxBody = wx.createDiv({ cls: "mal-dash-weather-body" });
+    const iconEl = wxBody.createDiv({ cls: "mal-dash-weather-icon", text: "🌡" });
+    const textEl = wxBody.createDiv({ cls: "mal-dash-weather-text" });
+    const tempEl = textEl.createDiv({ cls: "mal-dash-temp", text: "—°" });
+    const descEl = textEl.createDiv({ cls: "mal-dash-desc", text: "天气加载中…" });
+
+    this.plugin.getWeather().then(data => {
+      if (!wx.isConnected) return;
+      if (!data) {
+        descEl.setText("天气暂不可用");
+        descEl.setAttribute("title", "可在设置 → 首页小组件里指定城市");
+        return;
+      }
+      const w = weatherCodeInfo(data.code);
+      iconEl.setText(w.icon);
+      tempEl.setText(`${Math.round(data.temp)}°`);
+      descEl.setText(`${w.text}${data.city ? " · " + data.city : ""}`);
+      const range = Number.isFinite(data.high) && Number.isFinite(data.low)
+        ? `最高 ${Math.round(data.high)}° / 最低 ${Math.round(data.low)}°`
+        : "";
+      const humidity = Number.isFinite(data.humidity) ? `湿度 ${data.humidity}%` : "";
+      wx.setAttribute("title", [range, humidity, "数据来源：Open-Meteo"].filter(Boolean).join(" · "));
+    });
+  }
+
+  // 活跃月历：按天统计应用启动次数，颜色越深越活跃
+  renderActivityCalendar(body) {
+    if (this.plugin.settings.showActivityCalendar === false) return;
+    if (!this.calendarCursor) this.calendarCursor = new Date();
+    const cursor = new Date(this.calendarCursor.getFullYear(), this.calendarCursor.getMonth(), 1);
+    const daily = this.plugin.settings.launchDaily || {};
+
+    const card = body.createDiv({ cls: "mal-cal-card" });
+    const head = card.createDiv({ cls: "mal-cal-head" });
+    head.createDiv({ cls: "mal-cal-title", text: "活跃月历" });
+    const nav = head.createDiv({ cls: "mal-cal-nav" });
+    const prevBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "‹", attr: { "aria-label": "上一月" } });
+    const label = nav.createDiv({ cls: "mal-cal-label", text: `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月` });
+    const nextBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "›", attr: { "aria-label": "下一月" } });
+    const goPrev = () => {
+      this.calendarCursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
+      this.render();
+    };
+    const goNext = () => {
+      this.calendarCursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      this.render();
+    };
+    prevBtn.addEventListener("click", goPrev);
+    nextBtn.addEventListener("click", goNext);
+
+    const weekRow = card.createDiv({ cls: "mal-cal-weeks" });
+    for (const name of ["一", "二", "三", "四", "五", "六", "日"]) {
+      weekRow.createDiv({ cls: "mal-cal-week-name", text: name });
+    }
+
+    const grid = card.createDiv({ cls: "mal-cal-grid" });
+    const year = cursor.getFullYear();
+    const month = cursor.getMonth();
+    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // 周一为 0
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = new Date();
+    const total = Object.keys(daily).reduce((sum, key) => {
+      const [y, m] = key.split("-").map(Number);
+      return y === year && m === month + 1 ? sum + (daily[key] || 0) : sum;
+    }, 0);
+
+    for (let i = 0; i < firstWeekday; i++) grid.createDiv({ cls: "mal-cal-cell is-empty" });
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      const key = dateKey(date);
+      const count = daily[key] || 0;
+      const cell = grid.createDiv({ cls: "mal-cal-cell" });
+      cell.setText(String(day));
+      if (count > 0) cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
+      if (date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate()) {
+        cell.addClass("is-today");
+      }
+      const wd = date.getDay();
+      if (wd === 0 || wd === 6) cell.addClass("is-weekend");
+      cell.setAttribute("title", `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")} · ${count ? count + " 次启动" : "无启动记录"}`);
+    }
+    card.createDiv({ cls: "mal-cal-total", text: `本月共启动 ${total} 次 · 从最早有记录的一天开始累计` });
+  }
+
+
   renderProgress(body) {
     if (!this.plugin.scanning) return;
     const panel = body.createDiv({ cls: "mal-progress-panel" });
@@ -1023,6 +1204,8 @@ class MacAppLauncherView extends ItemView {
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
     if (!term) {
+      this.renderDashboard(body);
+      this.renderActivityCalendar(body);
       this.renderNoteBindings(body);
       this.renderNoteRecommendations(body);
     }
@@ -2384,6 +2567,37 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         });
       });
 
+    // ── 首页小组件：万年历与天气 ──
+    containerEl.createDiv({ cls: "mal-settings-group", text: "首页小组件" });
+
+    new Setting(containerEl)
+      .setName("显示万年历与今日天气")
+      .setDesc("在应用中心首页顶部展示公历、农历、节日与当天天气；关闭后首页只保留应用列表。")
+      .addToggle(tg => tg.setValue(this.plugin.settings.showDashboard !== false).onChange(async v => {
+        this.plugin.settings.showDashboard = v;
+        await this.plugin.saveSettings();
+        this.plugin.refreshViews();
+      }));
+
+    new Setting(containerEl)
+      .setName("天气位置")
+      .setDesc("留空则按网络定位自动识别城市；也可填写城市名（如 苏州、上海）固定位置。天气数据来自 Open-Meteo，只发送经纬度，不上传任何本地数据。")
+      .addText(t => t.setPlaceholder("自动定位").setValue(this.plugin.settings.weatherCity).onChange(async v => {
+        this.plugin.settings.weatherCity = v.trim();
+        this.plugin.weatherCache = null;
+        await this.plugin.saveSettings();
+        this.plugin.refreshViews();
+      }));
+
+    new Setting(containerEl)
+      .setName("显示活跃月历")
+      .setDesc("按天统计应用启动次数，用月历热力图展示活跃程度。数据只存本地配置，最多保留 400 天。")
+      .addToggle(tg => tg.setValue(this.plugin.settings.showActivityCalendar !== false).onChange(async v => {
+        this.plugin.settings.showActivityCalendar = v;
+        await this.plugin.saveSettings();
+        this.plugin.refreshViews();
+      }));
+
     // ── 维护：调试日志与历史清理 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "维护" });
 
@@ -2546,8 +2760,16 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           }))
         : [],
       schemaVersion: loaded.schemaVersion || 0,
+      // 首页小组件：万年历 + 今日天气 + 活跃月历
+      showDashboard: loaded.showDashboard !== false,
+      showActivityCalendar: loaded.showActivityCalendar !== false,
+      weatherCity: typeof loaded.weatherCity === "string" ? loaded.weatherCity : "",
+      launchDaily: loaded.launchDaily && typeof loaded.launchDaily === "object" ? loaded.launchDaily : {},
       debugLog: loaded.debugLog === true
     };
+    this.weatherCache = null;
+    this.weatherPromise = null;
+    this.holidayCache = null;
     // schemaVersion 版本化迁移：旧配置先备份（data.json.vN.bak）再升级，迁移失败可手动回滚
     if (this.settings.schemaVersion < SCHEMA_VERSION) {
       try {
@@ -2743,6 +2965,136 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // ---- 今日天气：坐标来自设置里的城市名，留空则按网络定位识别城市 ----
+  // 只向天气服务发送经纬度，不上传应用列表、使用记录或任何本地数据；结果缓存 30 分钟
+  async getWeather() {
+    const CACHE_MS = 30 * 60 * 1000;
+    const now = Date.now();
+    if (this.weatherCache && now - this.weatherCache.at < CACHE_MS) return this.weatherCache;
+    if (this.weatherPromise) return this.weatherPromise;
+    const fetchJson = async (url) => {
+      const res = await requestUrl({ url, method: "GET", throw: false });
+      if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
+      return res.json || JSON.parse(res.text);
+    };
+    this.weatherPromise = (async () => {
+      try {
+        let lat;
+        let lon;
+        let city = "";
+        const cityName = String(this.settings.weatherCity || "").trim();
+        if (cityName) {
+          const geo = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1&language=zh&format=json`);
+          const hit = geo && Array.isArray(geo.results) ? geo.results[0] : null;
+          if (!hit) throw new Error("城市未找到");
+          lat = Number(hit.latitude);
+          lon = Number(hit.longitude);
+          city = String(hit.name || cityName);
+        } else {
+          const ip = await fetchJson("https://get.geojs.io/v1/ip/geo.json");
+          lat = Number(ip.latitude);
+          lon = Number(ip.longitude);
+          city = String(ip.city || "");
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error("定位失败");
+        }
+        const wx = await fetchJson(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+          `&current=temperature_2m,relative_humidity_2m,weather_code` +
+          `&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
+        );
+        const cur = wx.current || {};
+        const daily = wx.daily || {};
+        const data = {
+          temp: Number(cur.temperature_2m),
+          humidity: Number(cur.relative_humidity_2m),
+          code: cur.weather_code,
+          high: Array.isArray(daily.temperature_2m_max) ? Number(daily.temperature_2m_max[0]) : NaN,
+          low: Array.isArray(daily.temperature_2m_min) ? Number(daily.temperature_2m_min[0]) : NaN,
+          city,
+          at: Date.now()
+        };
+        this.weatherCache = data;
+        this.debugLog("[weather] 已更新", city, `${data.temp}°`);
+        return data;
+      } catch (error) {
+        this.debugLog("[weather] 获取失败", String(error && error.message || error));
+        return null;
+      } finally {
+        this.weatherPromise = null;
+      }
+    })();
+    return this.weatherPromise;
+  }
+
+  // ---- 今日上班 / 休息：官方节假日与调休安排 ----
+  async getHolidayInfo(date) {
+    const year = date.getFullYear();
+    const key = dateKey(date);
+    const weekday = date.getDay();
+    const weekend = weekday === 0 || weekday === 6;
+    const fallback = () => ({
+      label: weekend ? "周末 · 休息" : "工作日",
+      rest: weekend,
+      detail: weekend ? "周六周日按休息日显示" : "周一至周五按工作日显示"
+    });
+    try {
+      const data = await this.loadHolidayYear(year);
+      const hit = data && Array.isArray(data.days) ? data.days.find(d => d.date === key) : null;
+      if (hit) {
+        if (hit.isOffDay) return { label: `${hit.name} · 休息`, rest: true, detail: `${key}：${hit.name} 放假` };
+        return { label: `${hit.name} · 调休上班`, rest: false, detail: `${key}：${hit.name} 调休上班` };
+      }
+      return fallback();
+    } catch (error) {
+      this.debugLog("[holiday] 获取失败", String(error && error.message || error));
+      return fallback();
+    }
+  }
+
+  // 年度节假日安排：优先读插件目录缓存，没有则从 holiday-cn 拉取（国务院公告整理）
+  async loadHolidayYear(year) {
+    if (this.holidayCache && this.holidayCache.year === year) return this.holidayCache.data;
+    const dir = path.join(this.pluginDirPath(), "holidays");
+    const file = path.join(dir, `${year}.json`);
+    try {
+      const text = await fs.promises.readFile(file, "utf8");
+      const data = JSON.parse(text);
+      this.holidayCache = { year, data };
+      return data;
+    } catch (e) { /* 无本地缓存，走网络 */ }
+    // 依次尝试多个源：jsDelivr CDN 优先（国内可达），GitHub raw 作为备选
+    const urls = [
+      `https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/${year}.json`,
+      `https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/${year}.json`
+    ];
+    for (const url of urls) {
+      try {
+        const res = await requestUrl({ url, throw: false });
+        if (res.status < 200 || res.status >= 300) throw new Error(`HTTP ${res.status}`);
+        const data = JSON.parse(res.text);
+        this.holidayCache = { year, data };
+        try {
+          await fs.promises.mkdir(dir, { recursive: true });
+          await fs.promises.writeFile(file, JSON.stringify(data), "utf8");
+        } catch (e) { /* 缓存写盘失败不影响使用 */ }
+        return data;
+      } catch (e) { /* 该源失败，换下一个 */ }
+    }
+    this.holidayCache = { year, data: null };
+    throw new Error("节假日数据获取失败");
+  }
+
+  // ---- 活跃月历：每次成功启动累加当天次数，只保留最近 400 天 ----
+  recordLaunchDaily() {
+    if (!this.settings.launchDaily || typeof this.settings.launchDaily !== "object") this.settings.launchDaily = {};
+    const key = dateKey(new Date());
+    this.settings.launchDaily[key] = (this.settings.launchDaily[key] || 0) + 1;
+    const keys = Object.keys(this.settings.launchDaily).sort();
+    if (keys.length > 400) {
+      for (const old of keys.slice(0, keys.length - 400)) delete this.settings.launchDaily[old];
+    }
   }
 
   // ---- 调试日志：写入插件目录 debug.log，超过 256KB 自动截断前半 ----
@@ -3874,6 +4226,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           // 频率统计：记录启动次数与最近启动时间
           app.launchCount = (app.launchCount || 0) + 1;
           app.lastLaunchedAt = Date.now();
+          this.recordLaunchDaily();
           this.saveSettings();
           this.logLaunchToDaily(app).catch(err => console.warn("[Mac App Launcher] 写入每日笔记失败", err));
           this.emitPublicEvent("app-launched", { id: app.id, name: app.name, category: app.category || "未分类" });
