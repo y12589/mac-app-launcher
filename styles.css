@@ -1,40 +1,76 @@
 .mal-view{position:relative;padding:18px 22px 28px;height:100%;overflow:auto}
-.mal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.mal-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.mal-title-wrap{min-width:0;flex:1 1 320px}
 .mal-title{margin:0 0 5px}
 .mal-subtitle{color:var(--text-muted);font-size:var(--font-smaller)}
+/* 左上角今日职场语录：一行标签 + 一句语录，超出省略 */
+.mal-quote{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-muted);font-size:var(--font-smaller)}
+.mal-quote-label{flex:0 0 auto;padding:1px 8px;border-radius:999px;background:var(--background-modifier-hover);color:var(--text-faint);font-size:10.5px;white-space:nowrap}
+.mal-quote-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mal-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* 右上角设置图标：一点展开操作菜单 */
+.mal-icon-btn{width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:9px;border:1px solid var(--background-modifier-border);background:var(--background-secondary);color:var(--text-muted);font-size:15px;line-height:1;cursor:pointer}
+.mal-icon-btn:hover{background:var(--background-modifier-hover);color:var(--text-normal)}
 .mal-search{min-width:180px;max-width:250px}
 .mal-primary{background:var(--interactive-accent);color:var(--text-on-accent);border-color:var(--interactive-accent)}
+/* 首页顶部 Hero：大时钟 + 日期 + 胶囊搜索（参考桌面启动器的自然排法） */
+.mal-hero{display:flex;flex-direction:column;align-items:center;gap:6px;margin:6px 0 24px;padding:16px 12px 8px}
+.mal-hero-clock{font-size:58px;font-weight:200;letter-spacing:1px;line-height:1.04;color:var(--text-normal);font-variant-numeric:tabular-nums}
+.mal-hero-date{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:center;font-size:var(--font-smaller);color:var(--text-muted)}
+.mal-hero-week,.mal-hero-lunar{color:var(--text-faint)}
+.mal-hero-festival{color:var(--text-accent)}
+.mal-hero-daytype{padding:0 8px;line-height:1.6;border-radius:999px;background:var(--background-modifier-hover);font-size:10.5px;color:var(--text-muted)}
+.mal-hero-daytype.is-rest{color:var(--text-success,#2f9e78)}
+.mal-hero-weather{display:inline-flex;align-items:center;gap:4px;color:var(--text-faint);font-size:10.5px;white-space:nowrap}
+.mal-hero-search{display:flex;align-items:center;gap:9px;width:min(440px,90%);margin-top:10px;padding:10px 16px;border-radius:999px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 70%,transparent);background:var(--background-secondary)}
+.mal-hero-search-icon{font-size:15px;color:var(--text-faint)}
+.mal-hero-input{flex:1;min-width:0;padding:0;border:0;background:transparent;box-shadow:none;font-size:var(--font-ui-small);color:var(--text-normal)}
+.mal-hero-input:focus{outline:none;box-shadow:none}
 .mal-button{white-space:nowrap}
-.mal-category-nav{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 22px;padding:2px 0 8px}
-.mal-nav-chip{border:1px solid var(--background-modifier-border);border-radius:999px;padding:7px 13px;background:var(--background-secondary);color:var(--text-muted);font-size:var(--font-smaller);white-space:nowrap}
-.mal-nav-chip:hover{border-color:var(--interactive-accent);color:var(--text-normal)}
+.mal-category-nav{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:4px 0 22px;padding:2px 0 8px}
+.mal-nav-chip{border:1px solid transparent;border-radius:999px;padding:6px 12px;background:transparent;color:var(--text-muted);font-size:var(--font-smaller);white-space:nowrap}
+.mal-nav-chip:hover{background:var(--background-modifier-hover);color:var(--text-normal)}
 .mal-nav-chip[draggable="true"]{cursor:grab}
 .mal-nav-chip.is-dragging{opacity:.35}
 .mal-nav-chip.is-drop-target{border:1px dashed var(--interactive-accent);color:var(--text-normal)}
 
 /* 最近启动条：紧凑小图标（只显示图标），与下方分类网格区分 */
-.mal-grid.is-compact:not(.is-list){gap:8px;grid-template-columns:repeat(auto-fill,56px)}
-.mal-grid.is-compact:not(.is-list) .mal-app-card{min-height:56px;padding:8px 6px;border-radius:11px}
-.mal-grid.is-compact:not(.is-list) .mal-app-icon{width:36px;height:36px}
-.mal-grid.is-compact:not(.is-list) .mal-native-icon{width:36px;height:36px}
-.mal-grid.is-compact:not(.is-list) .mal-fallback-icon{font-size:24px}
+.mal-grid.is-compact:not(.is-list){gap:8px;grid-template-columns:repeat(auto-fill,34px);grid-auto-rows:auto;justify-content:center}
+.mal-grid.is-compact .mal-app-card,.mal-grid.is-list .mal-app-card{grid-column:auto;grid-row:auto}
+.mal-grid.is-compact:not(.is-list) .mal-app-card{min-height:34px;padding:5px 4px;border-radius:9px}
+.mal-grid.is-compact:not(.is-list) .mal-app-icon{width:18px;height:18px}
+.mal-grid.is-compact:not(.is-list) .mal-native-icon{width:18px;height:18px}
+.mal-grid.is-compact:not(.is-list) .mal-fallback-icon{font-size:12px}
 .mal-grid.is-compact:not(.is-list) .mal-app-name{display:none}
-.mal-grid.is-compact:not(.is-list) .mal-pin-btn{display:none}
 .mal-nav-chip.is-active{background:var(--interactive-accent);border-color:var(--interactive-accent);color:var(--text-on-accent)}
 .mal-section{margin:0 0 26px}
-.mal-category{margin:0 0 12px;font-size:1em;font-weight:650;color:var(--text-muted)}
-.mal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:12px}
-.mal-app-card{position:relative;min-height:126px;padding:14px 8px 12px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary);color:var(--text-normal);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;cursor:grab;transition:transform 120ms ease,background 120ms ease,border-color 120ms ease,opacity 120ms ease;user-select:none}
-.mal-app-card:hover{background:var(--background-modifier-hover);border-color:var(--interactive-accent);transform:translateY(-2px)}
+.mal-category{margin:0 0 10px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--text-faint)}
+.mal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,100px));grid-auto-rows:88px;gap:16px;justify-content:center}
+.mal-app-card{position:relative;box-sizing:border-box;height:auto;min-height:88px;padding:6px 5px 5px;border:0;border-radius:14px;background:transparent;color:var(--text-normal);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:grab;overflow:hidden;transition:transform 120ms ease,background 120ms ease,border-color 120ms ease,opacity 120ms ease;user-select:none}
+
+/* 磁贴尺寸：右键「布局」可切 1×1 / 2×1 / 1×2 / 2×2，跨列跨行，图标等比放大 */
+.mal-app-card[data-tile="2x1"]{grid-column:span 2}
+.mal-app-card[data-tile="1x2"]{grid-row:span 2}
+.mal-app-card[data-tile="2x2"]{grid-column:span 2;grid-row:span 2}
+.mal-app-card[data-tile="2x1"] .mal-app-icon{width:56px;height:56px}
+.mal-app-card[data-tile="2x1"] .mal-native-icon{width:56px;height:56px}
+.mal-app-card[data-tile="2x1"] .mal-fallback-icon{font-size:38px}
+.mal-app-card[data-tile="1x2"] .mal-app-icon{width:72px;height:72px}
+.mal-app-card[data-tile="1x2"] .mal-native-icon{width:72px;height:72px}
+.mal-app-card[data-tile="1x2"] .mal-fallback-icon{font-size:48px}
+.mal-app-card[data-tile="2x2"] .mal-app-icon{width:96px;height:96px}
+.mal-app-card[data-tile="2x2"] .mal-native-icon{width:96px;height:96px}
+.mal-app-card[data-tile="2x2"] .mal-fallback-icon{font-size:64px}
+.mal-app-card:hover{background:var(--background-modifier-hover);transform:translateY(-2px)}
 .mal-app-card.is-dragging{opacity:.35;cursor:grabbing}
 .mal-app-card.is-drop-target{border:2px dashed var(--interactive-accent);background:var(--background-modifier-hover)}
-.mal-app-icon{width:60px;height:60px;display:flex;align-items:center;justify-content:center;pointer-events:none}
-.mal-native-icon{width:60px;height:60px;object-fit:contain;filter:drop-shadow(0 2px 3px rgba(0,0,0,.12))}
-.mal-fallback-icon{font-size:38px}
-.mal-app-name{max-width:100%;text-align:center;overflow-wrap:anywhere;font-size:var(--font-smaller);font-weight:600;pointer-events:none}
-.mal-pin-btn{position:absolute;right:6px;top:6px;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:var(--background-primary);color:var(--text-muted);font-size:19px;line-height:1;opacity:.78}
-.mal-pin-btn:hover,.mal-pin-btn.is-pinned{color:var(--text-warning);opacity:1}
+.mal-app-icon{width:52px;height:52px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.mal-native-icon{width:52px;height:52px;object-fit:contain;filter:drop-shadow(0 2px 3px rgba(0,0,0,.12))}
+.mal-fallback-icon{font-size:34px}
+/* 图标下方常显名称：跟随参考图的自然排法，不再做悬停浮层 */
+.mal-app-name{max-width:100%;padding:0 4px;text-align:center;font-size:11px;line-height:1.25;font-weight:500;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.mal-app-card[data-tile="2x1"] .mal-app-name,.mal-app-card[data-tile="1x2"] .mal-app-name{font-size:12px}
+.mal-app-card[data-tile="2x2"] .mal-app-name{font-size:13px}
 .mal-empty,.mal-muted{color:var(--text-muted)}
 .mal-empty-panel{max-width:520px;margin:50px auto;padding:30px 22px;text-align:center;border:1px dashed var(--background-modifier-border);border-radius:18px}
 .mal-empty-icon{font-size:42px;color:var(--text-muted)}
@@ -44,12 +80,12 @@
 .mal-progress-count{text-align:right;font-variant-numeric:tabular-nums}
 .mal-manage-summary{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 14px;font-size:var(--font-smaller)}
 .mal-manage-list{display:flex;flex-direction:column;gap:7px}
-.mal-manage-row{display:grid;grid-template-columns:24px 42px minmax(120px,1fr) minmax(190px,270px);align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:11px;background:var(--background-secondary)}
-.mal-manage-row.is-batch{grid-template-columns:24px 24px 42px minmax(120px,1fr) minmax(190px,270px)}
+.mal-manage-row{display:grid;grid-template-columns:24px 21px minmax(120px,1fr) minmax(190px,270px);align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:11px;background:var(--background-secondary)}
+.mal-manage-row.is-batch{grid-template-columns:24px 24px 21px minmax(120px,1fr) minmax(190px,270px)}
 .mal-check{width:17px;height:17px}
-.mal-manage-icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
-.mal-manage-icon .mal-native-icon{width:38px;height:38px}
-.mal-manage-icon .mal-fallback-icon{font-size:26px}
+.mal-manage-icon{width:21px;height:21px;display:flex;align-items:center;justify-content:center}
+.mal-manage-icon .mal-native-icon{width:19px;height:19px}
+.mal-manage-icon .mal-fallback-icon{font-size:13px}
 .mal-app-info{min-width:0}
 .mal-manage-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mal-app-path{font-size:10px;color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
@@ -63,8 +99,8 @@
 .mal-button-danger:hover{background:var(--background-modifier-error)}
 .mal-detail-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:20px}
 .mal-detail-identity{display:flex;align-items:center;gap:14px;min-width:0;flex:1}
-.mal-detail-icon{width:62px;height:62px;flex:0 0 62px;display:flex;align-items:center;justify-content:center}
-.mal-detail-icon .mal-native-icon{width:62px;height:62px}
+.mal-detail-icon{width:48px;height:48px;flex:0 0 48px;display:flex;align-items:center;justify-content:center}
+.mal-detail-icon .mal-native-icon{width:48px;height:48px}
 .mal-detail-names{min-width:0}
 .mal-detail-names h3{margin:0 0 5px}
 .mal-detail-meta{font-size:11px;color:var(--text-muted);overflow-wrap:anywhere}
@@ -72,12 +108,11 @@
 
 /* 列表视图 */
 .mal-grid.is-list{display:flex;flex-direction:column;gap:6px}
-.mal-grid.is-list .mal-app-card{min-height:0;flex-direction:row;justify-content:flex-start;padding:8px 12px;gap:12px}
-.mal-grid.is-list .mal-app-icon{width:32px;height:32px;flex:0 0 32px}
-.mal-grid.is-list .mal-app-icon .mal-native-icon{width:32px;height:32px}
-.mal-grid.is-list .mal-app-icon .mal-fallback-icon{font-size:22px}
-.mal-grid.is-list .mal-app-name{text-align:left;font-size:var(--font-ui-small)}
-.mal-grid.is-list .mal-pin-btn{position:static;margin-left:auto}
+.mal-grid.is-list .mal-app-card{height:auto;min-height:0;overflow:visible;border:1px solid var(--background-modifier-border);border-radius:11px;background:var(--background-secondary);flex-direction:row;justify-content:flex-start;padding:8px 12px;gap:12px}
+.mal-grid.is-list .mal-app-icon{width:26px;height:26px;flex:0 0 26px}
+.mal-grid.is-list .mal-app-icon .mal-native-icon{width:26px;height:26px}
+.mal-grid.is-list .mal-app-icon .mal-fallback-icon{font-size:18px}
+.mal-grid.is-list .mal-app-name{position:static;bottom:auto;padding:0;background:none;opacity:1;pointer-events:auto;white-space:normal;overflow:visible;text-overflow:clip;text-align:left;font-size:var(--font-ui-small);flex:1;max-width:none}
 
 /* 手动添加应用面板 */
 .mal-add-custom{margin:0 0 14px;padding:14px 16px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
@@ -237,43 +272,105 @@
 .mal-stats-bar.is-trend{background:var(--color-green, #4caf50)}
 .mal-stats-count{min-width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted);font-size:var(--font-smaller)}
 
-/* 首页仪表条：万年历 + 今日天气 */
-.mal-dash{display:grid;grid-template-columns:1fr 1fr 1.05fr;gap:10px;margin:0 0 20px;align-items:stretch}
-.mal-dash-card{padding:12px 14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary);min-height:0;display:flex;flex-direction:column;justify-content:center}
-.mal-dash-label{font-size:10px;letter-spacing:2px;color:var(--text-faint);margin-bottom:6px}
-.mal-dash-solar{font-size:1.28em;font-weight:650;letter-spacing:.3px;color:var(--text-normal)}
-.mal-dash-week{margin-top:2px;color:var(--text-muted);font-size:var(--font-smaller)}
-.mal-dash-lunar{margin-top:7px;font-size:var(--font-ui-small);color:var(--text-normal)}
-.mal-dash-tip{margin-top:5px;color:var(--text-warning);font-size:var(--font-smaller)}
-.mal-dash-weather-body{display:flex;align-items:center;gap:13px;margin-top:2px}
-.mal-dash-weather-icon{font-size:32px;line-height:1;flex:0 0 auto}
-.mal-dash-weather-text{min-width:0}
-.mal-dash-temp{font-size:1.32em;font-weight:650;line-height:1.2}
-.mal-dash-desc{color:var(--text-muted);font-size:var(--font-smaller)}
-.mal-dash-daytype{align-self:flex-start;margin-top:7px;padding:2px 9px;border:1px solid var(--background-modifier-border);border-radius:999px;background:var(--background-primary);font-size:var(--font-smaller);color:var(--text-muted)}
-.mal-dash-daytype.is-rest{color:var(--text-success, #2f9e78);border-color:color-mix(in srgb,var(--interactive-accent) 40%,transparent)}
-.mal-dash-daytype.is-work{color:var(--text-normal)}
+/* 首页活跃月历：无卡片底色，直接铺在页面上（万年历与天气已并入顶部 Hero） */
+.mal-board{height:200px;box-sizing:border-box;display:flex;flex-direction:column;margin:0;padding:0;border:0;background:transparent;overflow:hidden}
 
-/* 活跃月历 */
-.mal-cal-card{margin:0 0 26px;padding:12px 13px 10px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
-.mal-dash .mal-cal-card{margin:0;padding:10px 12px 8px;display:flex;flex-direction:column;justify-content:center}
-.mal-cal-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+/* 活跃月历（渲染在仪表板卡片内，铺满整行，高度自适应剩余空间） */
+.mal-cal-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
 .mal-cal-title{font-size:12px;font-weight:650;color:var(--text-normal);white-space:nowrap}
-.mal-cal-nav{display:flex;align-items:center;gap:2px}
-.mal-cal-nav-btn{padding:1px 6px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer}
+.mal-cal-nav{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:3px 8px}
+.mal-cal-nav-btn{padding:0 7px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font-size:15px;line-height:1.4;cursor:pointer}
 .mal-cal-nav-btn:hover{background:var(--background-modifier-hover);color:var(--text-accent)}
-.mal-cal-label{min-width:70px;text-align:center;font-size:10px;color:var(--text-muted);white-space:nowrap}
-.mal-cal-weeks,.mal-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
-.mal-cal-weeks{margin-bottom:3px}
-.mal-cal-week-name{padding-bottom:2px;text-align:center;font-size:9px;color:var(--text-faint)}
-.mal-cal-cell{display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:5px;background:var(--background-primary);font-size:10px;color:var(--text-muted)}
+.mal-cal-mode-btn{padding:0 8px;margin-right:4px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary);color:var(--text-muted);font-size:var(--font-smaller);line-height:1.7;cursor:pointer}
+.mal-cal-mode-btn:hover{background:var(--background-modifier-hover);color:var(--text-accent)}
+.mal-cal-label{min-width:86px;text-align:center;font-size:var(--font-smaller);color:var(--text-muted);white-space:nowrap}
+.mal-cal-weeks,.mal-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.mal-cal-weeks{flex:0 0 auto;margin-bottom:4px}
+.mal-cal-week-name{padding-bottom:1px;text-align:center;font-size:var(--font-smaller);color:var(--text-faint)}
+.mal-cal-grid{flex:1 1 auto;min-height:0}
+.mal-cal-cell{display:flex;align-items:center;justify-content:center;min-height:0;border-radius:7px;background:color-mix(in srgb,var(--background-modifier-border) 38%,transparent);font-size:var(--font-smaller);color:var(--text-faint);overflow:hidden}
 .mal-cal-cell.is-empty{background:transparent}
 .mal-cal-cell.is-weekend{color:var(--text-faint)}
-.mal-cal-cell.is-today{outline:2px solid var(--interactive-accent);font-weight:700;color:var(--text-normal)}
-.mal-cal-l1{background:color-mix(in srgb,var(--interactive-accent) 16%,transparent)}
+.mal-cal-year-wrap{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.mal-cal-year-grid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(53,minmax(0,1fr));grid-template-rows:repeat(7,minmax(0,1fr));grid-auto-flow:column;gap:3px}
+.mal-cal-year-cell{border-radius:3px;background:color-mix(in srgb,var(--background-modifier-border) 55%,transparent)}
+.mal-cal-year-cell.is-future{background:transparent}
+.mal-cal-year-cell.is-today{outline:1px solid var(--interactive-accent);outline-offset:0}
+.mal-cal-year-labels{flex:0 0 auto;display:grid;grid-template-columns:repeat(53,minmax(0,1fr));gap:3px;margin-top:4px}
+.mal-cal-year-label{font-size:10px;color:var(--text-faint);white-space:nowrap}
+.mal-cal-l1{background:color-mix(in srgb,var(--interactive-accent) 18%,transparent);color:var(--text-muted)}
 .mal-cal-l2{background:color-mix(in srgb,var(--interactive-accent) 34%,transparent);color:var(--text-normal)}
-.mal-cal-l3{background:color-mix(in srgb,var(--interactive-accent) 52%,transparent);color:var(--text-normal)}
-.mal-cal-l4{background:color-mix(in srgb,var(--interactive-accent) 70%,transparent);color:var(--text-on-accent)}
-.mal-cal-total{margin-top:6px;text-align:right;font-size:10px;color:var(--text-faint)}
-@media(max-width:900px){.mal-dash{grid-template-columns:1fr 1fr}}
-@media(max-width:650px){.mal-dash{grid-template-columns:1fr}}
+.mal-cal-l3{background:color-mix(in srgb,var(--interactive-accent) 50%,transparent);color:var(--text-normal)}
+.mal-cal-l4{background:color-mix(in srgb,var(--interactive-accent) 66%,transparent);color:var(--text-normal)}
+.mal-cal-cell.is-today{background:var(--interactive-accent);color:var(--text-on-accent);font-weight:650}
+.mal-cal-legend{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-faint)}
+.mal-cal-swatch{width:9px;height:9px;border-radius:2px}
+.mal-cal-swatch.is-on{background:color-mix(in srgb,var(--interactive-accent) 34%,transparent)}
+.mal-cal-swatch.is-off{background:color-mix(in srgb,var(--background-modifier-border) 55%,transparent)}
+.mal-cal-total{font-size:var(--font-smaller);color:var(--text-faint);white-space:nowrap}
+@media(max-width:600px){.mal-cal-weeks,.mal-cal-grid{gap:4px}}
+
+/* 首页自由布局：12 列网格，模块宽度可拖、高度默认贴合内容（行高 auto） */
+.mal-home-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:auto;gap:12px;align-items:start;margin:0 0 16px}
+.mal-mod{position:relative;min-width:0;min-height:0;border-radius:14px;overflow:hidden;transition:opacity 120ms ease}
+.mal-mod-content{height:100%;box-sizing:border-box;overflow:auto;padding:4px 100px 6px;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--text-faint) 30%,transparent) transparent}
+.mal-mod-content::-webkit-scrollbar{width:6px;height:6px}
+.mal-mod-content::-webkit-scrollbar-thumb{border-radius:3px;background:color-mix(in srgb,var(--text-faint) 30%,transparent)}
+.mal-mod-content::-webkit-scrollbar-track{background:transparent}
+.mal-mod-content>.mal-board{height:200px;margin:0}
+.mal-mod-content>.mal-section,.mal-mod-content>.mal-pinned-top,.mal-mod-content>.mal-note-recs,.mal-mod-content>.mal-category-nav{margin:0;padding:0;border:0}
+.mal-mod-content .mal-category{margin:0 0 6px}
+.mal-mod-content .mal-grid{gap:10px}
+.mal-mod:hover{outline:1px dashed var(--background-modifier-border);outline-offset:-1px}
+.mal-mod-grip{position:absolute;right:3px;top:3px;z-index:4;width:18px;height:18px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;color:var(--text-faint);background:var(--background-primary);border:1px solid var(--background-modifier-border);opacity:0;cursor:grab;user-select:none}
+.mal-mod:hover>.mal-mod-grip{opacity:.9}
+.mal-mod-grip:hover{color:var(--interactive-accent)}
+.mal-mod-grip:active{cursor:grabbing}
+.mal-mod-resize{position:absolute;right:1px;bottom:1px;z-index:4;width:16px;height:16px;border-radius:5px;opacity:0;cursor:nwse-resize;background:linear-gradient(135deg,transparent 44%,var(--text-faint) 45%,var(--text-faint) 51%,transparent 52%,transparent 61%,var(--text-faint) 62%,var(--text-faint) 68%,transparent 69%)}
+.mal-mod:hover>.mal-mod-resize{opacity:.8}
+.mal-mod.is-dragging{opacity:.4}
+.mal-mod.is-drop-target{outline:2px dashed var(--interactive-accent);outline-offset:-2px}
+.mal-mod.is-resizing{outline:1px solid var(--interactive-accent);outline-offset:-1px}
+.mal-home-grid.is-drop-end{outline:2px dashed var(--interactive-accent);outline-offset:4px;border-radius:10px}
+.mal-layout-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:2px 0 18px;color:var(--text-faint);font-size:var(--font-smaller)}
+.mal-layout-hint{color:var(--text-faint)}
+body.mal-resizing{user-select:none;cursor:nwse-resize}
+body.mal-resizing *{cursor:nwse-resize !important}
+
+/* ===== 视觉打磨：统一节奏、层次与细节 ===== */
+/* Hero：时钟做轻微渐变收光，日期用细圆点分隔，搜索框浮起并有聚焦光晕 */
+.mal-hero{margin:4px 0 26px;padding:20px 12px 8px}
+.mal-hero-clock{font-size:62px;font-weight:200;letter-spacing:-.012em;background:linear-gradient(180deg,var(--text-normal) 12%,color-mix(in srgb,var(--text-normal) 62%,transparent));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.mal-hero-date{gap:0;font-size:12px;letter-spacing:.02em}
+.mal-hero-date>span+span::before{content:"·";margin:0 8px;color:var(--text-faint);opacity:.55}
+.mal-hero-date>.mal-hero-daytype::before,.mal-hero-date>.mal-hero-weather::before{content:none;margin:0}
+.mal-hero-date>.mal-hero-daytype{margin-left:8px}
+.mal-hero-daytype{padding:1px 9px;border-radius:6px;background:color-mix(in srgb,var(--text-faint) 12%,transparent);font-size:10.5px;letter-spacing:.04em}
+.mal-hero-search{margin-top:14px;padding:10px 18px;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.03),0 6px 18px -10px rgba(0,0,0,.18);transition:border-color 150ms ease,box-shadow 150ms ease,background 150ms ease}
+.mal-hero-search:hover{border-color:color-mix(in srgb,var(--text-faint) 45%,transparent)}
+.mal-hero-search:focus-within{border-color:color-mix(in srgb,var(--interactive-accent) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--interactive-accent) 12%,transparent),0 6px 18px -10px rgba(0,0,0,.2)}
+
+/* 分类芯片：一条淡底胶囊条，选中用柔和强调色而非实心块 */
+.mal-category-nav{gap:6px;width:fit-content;max-width:100%;margin:0 auto 26px;padding:7px 10px;border-radius:12px;background:color-mix(in srgb,var(--background-secondary) 62%,transparent)}
+.mal-nav-chip{padding:5px 12px;border-radius:8px;letter-spacing:.01em;transition:background 130ms ease,color 130ms ease}
+.mal-nav-chip.is-active{background:color-mix(in srgb,var(--interactive-accent) 15%,transparent);border-color:transparent;color:var(--interactive-accent);font-weight:600}
+
+/* 分区标题：左侧强调竖条 + 右侧渐隐分隔线 */
+.mal-section{margin:0 0 30px}
+.mal-category{display:flex;align-items:center;gap:9px;margin:2px 0 12px;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--text-muted)}
+.mal-category::before{content:"";flex:0 0 3px;width:3px;height:12px;border-radius:2px;background:linear-gradient(180deg,var(--interactive-accent),color-mix(in srgb,var(--interactive-accent) 25%,transparent))}
+.mal-category::after{content:"";flex:1 1 auto;height:1px;background:linear-gradient(90deg,color-mix(in srgb,var(--background-modifier-border) 85%,transparent),transparent)}
+
+/* 应用磁贴：悬停柔和浮起，图标带轻微投影，名称随悬停提亮 */
+.mal-app-card{border-radius:16px;transition:transform 150ms cubic-bezier(.2,.8,.2,1),background 150ms ease,opacity 130ms ease}
+.mal-app-card:hover{background:color-mix(in srgb,var(--background-secondary) 82%,transparent);transform:translateY(-1px)}
+.mal-native-icon{filter:drop-shadow(0 3px 7px rgba(0,0,0,.14))}
+.mal-app-name{letter-spacing:.01em;transition:color 140ms ease}
+.mal-app-card:hover .mal-app-name{color:var(--text-normal)}
+
+/* 活跃月历：格子圆角更柔和，图例收敛 */
+.mal-cal-cell,.mal-cal-year-cell{border-radius:2.5px}
+.mal-cal-mode-btn{border-radius:7px;transition:background 130ms ease,color 130ms ease}
+.mal-cal-title{letter-spacing:.04em}
+.mal-cal-total,.mal-cal-l{letter-spacing:.02em}
+
