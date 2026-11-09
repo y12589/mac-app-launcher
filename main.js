@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.25.1", changes: ["万年历、今日天气、活跃月历改为同一行三列展示，卡片宽度收窄，窗口变窄时自动折行"] },
   { version: "1.25.0", changes: ["首页新增万年历：公历、星期、农历干支生肖、节日，并显示今日上班/休息（按法定节假日与调休安排）", "新增今日天气：简单显示温度与天气，位置可留空自动定位或指定城市，缓存 30 分钟", "新增活跃月历：按天统计应用启动次数的热力图，可前后翻月查看"] },
   { version: "1.24.11", changes: ["手动添加应用改为原生选择器：点「选择应用…」在 Finder 里挑 .app，选完自动填路径，不必手动输入"] },
   { version: "1.24.10", changes: ["紧急修复：自动更新误判导致「下载→覆盖→重载」死循环，版本比较改读磁盘 manifest（1.24.9 打包时被循环覆盖，已作废）"] },
@@ -988,9 +989,9 @@ class MacAppLauncherView extends ItemView {
     else this.renderHome(body, term);
   }
 
-  // 首页仪表条：万年历 + 今日天气（天气异步加载，不阻塞应用列表渲染）
+  // 首页仪表条：万年历 + 今日天气 + 活跃月历 同一行（天气异步加载，不阻塞应用列表渲染）
   renderDashboard(body) {
-    if (this.plugin.settings.showDashboard === false) return;
+    if (this.plugin.settings.showDashboard === false) return null;
     const dash = body.createDiv({ cls: "mal-dash" });
 
     const info = getCalendarInfo(new Date());
@@ -1035,6 +1036,8 @@ class MacAppLauncherView extends ItemView {
       const humidity = Number.isFinite(data.humidity) ? `湿度 ${data.humidity}%` : "";
       wx.setAttribute("title", [range, humidity, "数据来源：Open-Meteo"].filter(Boolean).join(" · "));
     });
+
+    return dash;
   }
 
   // 活跃月历：按天统计应用启动次数，颜色越深越活跃
@@ -1204,8 +1207,8 @@ class MacAppLauncherView extends ItemView {
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
     if (!term) {
-      this.renderDashboard(body);
-      this.renderActivityCalendar(body);
+      const dash = this.renderDashboard(body);
+      this.renderActivityCalendar(dash || body);
       this.renderNoteBindings(body);
       this.renderNoteRecommendations(body);
     }
