@@ -12,6 +12,7 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.26.0", changes: ["首页改为桌面启动器风格：大时钟、日期农历一行、居中搜索框，仪表盘与分类去卡片底", "应用磁贴支持 1×1 / 2×1 / 1×2 / 2×2 四种布局，右键「布局」切换，图标等比放大", "图标右键菜单：编辑 / 更换自定义图标、恢复默认图标、编辑应用主页", "首页各模块（含分类）可自由拖拽换位、拖拽调整宽高，模块高度自适应内容并持久化", "移除「最近启动」模块与卡片右上角置顶星标，分类导航去掉「全部」并整体居中", "细节打磨：分类标题竖条与分隔线、芯片条柔和选中态、悬停浮起与图标投影"] },
   { version: "1.25.1", changes: ["万年历、今日天气、活跃月历改为同一行三列展示，卡片宽度收窄，窗口变窄时自动折行"] },
   { version: "1.25.0", changes: ["首页新增万年历：公历、星期、农历干支生肖、节日，并显示今日上班/休息（按法定节假日与调休安排）", "新增今日天气：简单显示温度与天气，位置可留空自动定位或指定城市，缓存 30 分钟", "新增活跃月历：按天统计应用启动次数的热力图，可前后翻月查看"] },
   { version: "1.24.11", changes: ["手动添加应用改为原生选择器：点「选择应用…」在 Finder 里挑 .app，选完自动填路径，不必手动输入"] },
@@ -220,6 +221,39 @@ const LUNAR_MONTH_NAMES = { "正月": 1, "一月": 1, "二月": 2, "三月": 3, 
 const LUNAR_DAY_NAMES = ["初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"];
 const ZODIAC_BY_BRANCH = { "子": "鼠", "丑": "牛", "寅": "虎", "卯": "兔", "辰": "龙", "巳": "蛇", "午": "马", "未": "羊", "申": "猴", "酉": "鸡", "戌": "狗", "亥": "猪" };
 const WEEKDAY_NAMES = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+// 首页左上角「今日职场语录」：按日期轮换，同一天固定同一条
+const WORK_QUOTES = [
+  "「把注意力放在能改变的事上，其余的交给时间。」",
+  "「先把最难的那件事做完，一天就顺了。」",
+  "「工作的体面，来自把话说明白、把事做完整。」",
+  "「不必证明自己很努力，交付结果就够了。」",
+  "「能拒绝的人，才守得住自己的节奏。」",
+  "「慢一点想清楚，快一点做到位。」",
+  "「把情绪留在门外，把专业带进会议室。」",
+  "「今天多做一件小事，明天就少一件麻烦。」",
+  "「别用忙碌掩盖犹豫，先问自己在解决什么问题。」",
+  "「边界不是冷漠，是让合作可持续。」",
+  "「能被复述的方案，才是好方案。」",
+  "「先完成，再完美；先对齐，再发力。」",
+  "「不为难自己，也不为难别人。」",
+  "「你的时间值钱，别人的时间也值钱。」",
+  "「把功劳说清楚，把责任接得住。」",
+  "「会休息的人，才跑得远。」",
+  "「别急着表态，先听完再回答。」",
+  "「把复杂留给自己，把简单交给对方。」",
+  "「长期主义不是熬，是每天都在往前挪一点。」",
+  "「专业，就是把重复的事越做越稳。」",
+  "「不和烂事纠缠，是一种能力。」",
+  "「先照顾好自己的状态，再谈效率。」",
+  "「把每一次交付，当成下一次的信用。」",
+  "「走得稳，比走得快重要。」"
+];
+
+function dailyWorkQuote(date = new Date()) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((date - start) / 86400000);
+  return WORK_QUOTES[dayOfYear % WORK_QUOTES.length];
+}
 const SOLAR_FESTIVALS = { "1-1": "元旦", "2-14": "情人节", "3-8": "妇女节", "4-1": "愚人节", "5-1": "劳动节", "5-4": "青年节", "6-1": "儿童节", "9-10": "教师节", "10-1": "国庆节", "12-25": "圣诞节" };
 const LUNAR_FESTIVALS = { "1-1": "春节", "1-15": "元宵节", "2-2": "龙抬头", "5-5": "端午节", "7-7": "七夕", "8-15": "中秋节", "9-9": "重阳节", "12-8": "腊八节", "12-23": "小年" };
 
@@ -227,6 +261,12 @@ function lunarMonthNumber(monthName) {
   if (!monthName) return 0;
   const clean = String(monthName).replace(/^闰/, "");
   return LUNAR_MONTH_NAMES[clean] || 0;
+}
+
+function clampInt(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
 }
 
 function dateKey(date) {
@@ -824,7 +864,10 @@ function normalizeApp(app, index) {
     description: typeof app.description === "string" ? app.description : suggested.description,
     usage: typeof app.usage === "string" ? app.usage : suggested.usage,
     iconPath: app.iconPath || "",
-    iconSource: app.iconSource || ""
+    iconSource: app.iconSource || "",
+    tileW: app.tileW === 2 ? 2 : 1,
+    tileH: app.tileH === 2 ? 2 : 1,
+    customIcon: !!app.customIcon
   };
 }
 
@@ -868,7 +911,13 @@ class MacAppLauncherView extends ItemView {
   getDisplayText() { return "Mac 应用中心"; }
   getIcon() { return "layout-grid"; }
   async onOpen() { this.render(); }
-  async onClose() { this.disconnectIconObserver(); }
+  async onClose() {
+    if (this.clockTimer) {
+      window.clearInterval(this.clockTimer);
+      this.clockTimer = null;
+    }
+    this.disconnectIconObserver();
+  }
 
   disconnectIconObserver() {
     if (this.iconObserver) {
@@ -901,34 +950,39 @@ class MacAppLauncherView extends ItemView {
 
     const header = root.createDiv({ cls: "mal-header" });
     const titleWrap = header.createDiv({ cls: "mal-title-wrap" });
-    titleWrap.createEl("h2", {
-      text: this.mode === "manage" ? "管理应用" : "应用中心",
-      cls: "mal-title"
-    });
-    titleWrap.createEl("div", {
-      text: this.mode === "manage"
-        ? "勾选需要展示的软件，设置分类和应用介绍"
-        : "点击应用卡片查看用途，再通过启动按钮打开软件；拖动卡片可调整顺序",
-      cls: "mal-subtitle"
-    });
+    if (this.mode === "manage") {
+      titleWrap.createEl("h2", { text: "管理应用", cls: "mal-title" });
+      titleWrap.createEl("div", {
+        text: "勾选需要展示的软件，设置分类和应用介绍",
+        cls: "mal-subtitle"
+      });
+    } else {
+      const quote = dailyWorkQuote();
+      const line = titleWrap.createDiv({ cls: "mal-quote" });
+      line.createSpan({ cls: "mal-quote-label", text: "今日职场语录" });
+      line.createSpan({ cls: "mal-quote-text", text: quote, attr: { title: quote } });
+    }
 
     const controls = header.createDiv({ cls: "mal-controls" });
-    const search = controls.createEl("input", {
-      attr: { type: "search", placeholder: this.mode === "manage" ? "搜索扫描结果…" : "搜索已选应用…" },
-      cls: "mal-search"
-    });
-    search.value = this.searchTerm;
-
-    const scan = controls.createEl("button", {
-      text: this.plugin.scanning ? "取消扫描" : "重新扫描",
-      cls: "mal-button"
-    });
-    scan.addEventListener("click", () => {
-      if (this.plugin.scanning) this.plugin.cancelScan();
-      else this.plugin.scanInstalledApps();
-    });
-
+    // 首页搜索框在顶部 Hero 里，右上角只留一个设置图标，点开才是各项操作
+    let search = null;
     if (this.mode === "manage") {
+      search = controls.createEl("input", {
+        attr: { type: "search", placeholder: "搜索扫描结果…" },
+        cls: "mal-search"
+      });
+      search.value = this.searchTerm;
+      search.addEventListener("input", () => this.debouncedSearch(search.value));
+
+      const scan = controls.createEl("button", {
+        text: this.plugin.scanning ? "取消扫描" : "重新扫描",
+        cls: "mal-button"
+      });
+      scan.addEventListener("click", () => {
+        if (this.plugin.scanning) this.plugin.cancelScan();
+        else this.plugin.scanInstalledApps();
+      });
+
       const all = controls.createEl("button", { text: "全选", cls: "mal-button" });
       all.addEventListener("click", () => this.plugin.setAllSelected(true));
       const none = controls.createEl("button", { text: "清空", cls: "mal-button" });
@@ -944,41 +998,131 @@ class MacAppLauncherView extends ItemView {
           : "还没有选择要展示的应用：在管理应用里点击应用名称或勾选「展示」框", 4000);
       });
     } else {
-      const toggleView = controls.createEl("button", {
-        text: this.plugin.settings.viewMode === "list" ? "▦ 网格" : "☰ 列表",
-        cls: "mal-button",
-        attr: { title: "切换网格 / 列表视图" }
+      const gear = controls.createEl("button", {
+        text: "⚙",
+        cls: "mal-icon-btn",
+        attr: { title: "设置与操作", "aria-label": "设置与操作" }
       });
-      toggleView.addEventListener("click", async () => {
+      gear.addEventListener("click", event => this.openHomeMenu(event));
+    }
+
+    if (this.mode === "home") this.renderHero(root);
+    const body = root.createDiv({ cls: "mal-body" });
+    this.bodyEl = body;
+    this.renderBody(body);
+  }
+
+  // 右上角设置图标：点开二级菜单，集中视图切换、布局开关、扫描、管理与重载
+  openHomeMenu(event) {
+    const menu = new Menu();
+    menu.addItem(item => item
+      .setTitle(this.plugin.settings.viewMode === "list" ? "切换为网格视图" : "切换为列表视图")
+      .setIcon("layout-grid")
+      .onClick(async () => {
         this.plugin.settings.viewMode = this.plugin.settings.viewMode === "list" ? "grid" : "list";
         await this.plugin.saveSettings();
         this.render();
-      });
-      const manage = controls.createEl("button", { text: "管理应用", cls: "mal-primary" });
-      manage.addEventListener("click", () => {
+      }));
+    menu.addItem(item => item
+      .setTitle(this.plugin.settings.homeFreeLayout === false ? "开启自由布局" : "关闭自由布局")
+      .setIcon("move")
+      .onClick(async () => {
+        this.plugin.settings.homeFreeLayout = this.plugin.settings.homeFreeLayout === false;
+        await this.plugin.saveSettings();
+        this.render();
+      }));
+    menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle("管理应用")
+      .setIcon("sliders-horizontal")
+      .onClick(() => {
         this.mode = "manage";
         this.searchTerm = "";
         this.render();
-      });
-      const reload = controls.createEl("button", {
-        text: "↻",
-        cls: "mal-button",
-        attr: { title: "重载插件（不必重启 Obsidian）" }
-      });
-      reload.addEventListener("click", async () => {
+      }));
+    menu.addItem(item => item
+      .setTitle(this.plugin.scanning ? "取消扫描" : "重新扫描应用")
+      .setIcon("refresh-cw")
+      .onClick(() => {
+        if (this.plugin.scanning) this.plugin.cancelScan();
+        else this.plugin.scanInstalledApps();
+      }));
+    menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle("重载插件")
+      .setIcon("rotate-cw")
+      .onClick(async () => {
         new Notice("正在重载 Mac App Launcher…");
         const pluginId = this.plugin.manifest.id;
         await this.app.plugins.disablePlugin(pluginId);
         await this.app.plugins.enablePlugin(pluginId);
+      }));
+    menu.showAtMouseEvent(event);
+  }
+
+  // 首页顶部 Hero：大时钟 + 日期（公历 / 星期 / 农历）+ 胶囊搜索框
+  renderHero(root) {
+    if (this.clockTimer) {
+      window.clearInterval(this.clockTimer);
+      this.clockTimer = null;
+    }
+    const hero = root.createDiv({ cls: "mal-hero" });
+    const clock = hero.createDiv({ cls: "mal-hero-clock", text: "00:00:00" });
+    const tick = () => {
+      const d = new Date();
+      clock.setText(
+        `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`
+      );
+    };
+    tick();
+    this.clockTimer = window.setInterval(() => {
+      if (!clock.isConnected) {
+        window.clearInterval(this.clockTimer);
+        this.clockTimer = null;
+        return;
+      }
+      tick();
+    }, 1000);
+
+    const info = getCalendarInfo(new Date());
+    const date = hero.createDiv({ cls: "mal-hero-date" });
+    date.createSpan({ text: info.solar.replace(/^\d{4}年/, "") });
+    date.createSpan({ text: info.week, cls: "mal-hero-week" });
+    const lunar = info.lunar
+      .replace(/^[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年（[^）]*）/, "")
+      .replace(/^[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]年/, "");
+    if (lunar) date.createSpan({ text: lunar, cls: "mal-hero-lunar" });
+    if (info.festival) date.createSpan({ text: info.festival, cls: "mal-hero-festival" });
+
+    // 万年历的上班 / 休息与今日天气并入日期行，避免和下方仪表板重复
+    if (this.plugin.settings.showDashboard !== false) {
+      const dayType = date.createSpan({ cls: "mal-hero-daytype", text: "…" });
+      this.plugin.getHolidayInfo(new Date()).then(h => {
+        if (!dayType.isConnected || !h) return;
+        dayType.setText(h.label);
+        dayType.addClass(h.rest ? "is-rest" : "is-work");
+        dayType.setAttribute("title", h.detail || h.label);
+      });
+      const weather = date.createSpan({ cls: "mal-hero-weather" });
+      this.plugin.getWeather().then(data => {
+        if (!weather.isConnected || !data) return;
+        const w = weatherCodeInfo(data.code);
+        weather.setText(`${w.icon} ${Math.round(data.temp)}° ${w.text}`);
+        const range = Number.isFinite(data.high) && Number.isFinite(data.low)
+          ? `最高 ${Math.round(data.high)}° / 最低 ${Math.round(data.low)}°`
+          : "";
+        weather.setAttribute("title", [range, data.city, "数据来源：Open-Meteo"].filter(Boolean).join(" · "));
       });
     }
 
-    const body = root.createDiv({ cls: "mal-body" });
-    this.bodyEl = body;
-    search.addEventListener("input", () => {
-      this.debouncedSearch(search.value);
+    const box = hero.createDiv({ cls: "mal-hero-search" });
+    box.createSpan({ cls: "mal-hero-search-icon", text: "⌕" });
+    const input = box.createEl("input", {
+      attr: { type: "search", placeholder: "搜索已选应用…" },
+      cls: "mal-hero-input"
     });
-    this.renderBody(body);
+    input.value = this.searchTerm;
+    input.addEventListener("input", () => this.debouncedSearch(input.value));
   }
 
   renderBody(body) {
@@ -989,68 +1133,36 @@ class MacAppLauncherView extends ItemView {
     else this.renderHome(body, term);
   }
 
-  // 首页仪表条：万年历 + 今日天气 + 活跃月历 同一行（天气异步加载，不阻塞应用列表渲染）
+  // 首页仪表板：万年历与天气已并入顶部 Hero，这里只保留活跃月历热力图
   renderDashboard(body) {
-    if (this.plugin.settings.showDashboard === false) return null;
-    const dash = body.createDiv({ cls: "mal-dash" });
-
-    const info = getCalendarInfo(new Date());
-    const cal = dash.createDiv({ cls: "mal-dash-card mal-dash-cal" });
-    cal.createDiv({ cls: "mal-dash-label", text: "万年历" });
-    cal.createDiv({ cls: "mal-dash-solar", text: info.solar });
-    cal.createDiv({ cls: "mal-dash-week", text: info.week });
-    if (info.lunar) cal.createDiv({ cls: "mal-dash-lunar", text: `农历 ${info.lunar}` });
-    if (info.festival) cal.createDiv({ cls: "mal-dash-tip", text: info.festival });
-
-    // 今日上班 / 休息：按官方节假日与调休安排（异步拉取，失败时按周末判断）
-    const dayTypeEl = cal.createDiv({ cls: "mal-dash-daytype", text: "…" });
-    this.plugin.getHolidayInfo(new Date()).then(h => {
-      if (!dayTypeEl.isConnected || !h) return;
-      dayTypeEl.setText(h.label);
-      dayTypeEl.addClass(h.rest ? "is-rest" : "is-work");
-      dayTypeEl.setAttribute("title", h.detail || h.label);
-    });
-
-    const wx = dash.createDiv({ cls: "mal-dash-card mal-dash-weather" });
-    wx.createDiv({ cls: "mal-dash-label", text: "今日天气" });
-    const wxBody = wx.createDiv({ cls: "mal-dash-weather-body" });
-    const iconEl = wxBody.createDiv({ cls: "mal-dash-weather-icon", text: "🌡" });
-    const textEl = wxBody.createDiv({ cls: "mal-dash-weather-text" });
-    const tempEl = textEl.createDiv({ cls: "mal-dash-temp", text: "—°" });
-    const descEl = textEl.createDiv({ cls: "mal-dash-desc", text: "天气加载中…" });
-
-    this.plugin.getWeather().then(data => {
-      if (!wx.isConnected) return;
-      if (!data) {
-        descEl.setText("天气暂不可用");
-        descEl.setAttribute("title", "可在设置 → 首页小组件里指定城市");
-        return;
-      }
-      const w = weatherCodeInfo(data.code);
-      iconEl.setText(w.icon);
-      tempEl.setText(`${Math.round(data.temp)}°`);
-      descEl.setText(`${w.text}${data.city ? " · " + data.city : ""}`);
-      const range = Number.isFinite(data.high) && Number.isFinite(data.low)
-        ? `最高 ${Math.round(data.high)}° / 最低 ${Math.round(data.low)}°`
-        : "";
-      const humidity = Number.isFinite(data.humidity) ? `湿度 ${data.humidity}%` : "";
-      wx.setAttribute("title", [range, humidity, "数据来源：Open-Meteo"].filter(Boolean).join(" · "));
-    });
-
-    return dash;
+    if (this.plugin.settings.showActivityCalendar === false) return;
+    const board = body.createDiv({ cls: "mal-board" });
+    this.renderActivityCalendar(board);
   }
 
-  // 活跃月历：按天统计应用启动次数，颜色越深越活跃
-  renderActivityCalendar(body) {
-    if (this.plugin.settings.showActivityCalendar === false) return;
+  // 活跃月历：按天统计应用启动次数，颜色越深越活跃（渲染进仪表板卡片内）
+  renderActivityCalendar(board) {
     if (!this.calendarCursor) this.calendarCursor = new Date();
+    if (this.calendarYearMode === undefined) this.calendarYearMode = true;
     const cursor = new Date(this.calendarCursor.getFullYear(), this.calendarCursor.getMonth(), 1);
     const daily = this.plugin.settings.launchDaily || {};
 
-    const card = body.createDiv({ cls: "mal-cal-card" });
-    const head = card.createDiv({ cls: "mal-cal-head" });
+    const head = board.createDiv({ cls: "mal-cal-head" });
     head.createDiv({ cls: "mal-cal-title", text: "活跃月历" });
     const nav = head.createDiv({ cls: "mal-cal-nav" });
+    const toggleBtn = nav.createEl("button", { cls: "mal-cal-mode-btn", text: this.calendarYearMode ? "按月" : "全年" });
+    toggleBtn.addEventListener("click", () => {
+      this.calendarYearMode = !this.calendarYearMode;
+      this.render();
+    });
+
+    if (this.calendarYearMode) {
+      nav.createDiv({ cls: "mal-cal-label", text: "近一年" });
+      const totalEl = this.calLegend(nav);
+      this.renderYearMap(board, daily, totalEl);
+      return;
+    }
+
     const prevBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "‹", attr: { "aria-label": "上一月" } });
     const label = nav.createDiv({ cls: "mal-cal-label", text: `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月` });
     const nextBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "›", attr: { "aria-label": "下一月" } });
@@ -1065,16 +1177,17 @@ class MacAppLauncherView extends ItemView {
     prevBtn.addEventListener("click", goPrev);
     nextBtn.addEventListener("click", goNext);
 
-    const weekRow = card.createDiv({ cls: "mal-cal-weeks" });
+    const weekRow = board.createDiv({ cls: "mal-cal-weeks" });
     for (const name of ["一", "二", "三", "四", "五", "六", "日"]) {
       weekRow.createDiv({ cls: "mal-cal-week-name", text: name });
     }
 
-    const grid = card.createDiv({ cls: "mal-cal-grid" });
+    const grid = board.createDiv({ cls: "mal-cal-grid" });
     const year = cursor.getFullYear();
     const month = cursor.getMonth();
     const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // 周一为 0
     const daysInMonth = new Date(year, month + 1, 0).getDate();
+    grid.style.gridTemplateRows = `repeat(${Math.ceil((firstWeekday + daysInMonth) / 7)}, minmax(0, 1fr))`;
     const today = new Date();
     const total = Object.keys(daily).reduce((sum, key) => {
       const [y, m] = key.split("-").map(Number);
@@ -1087,16 +1200,71 @@ class MacAppLauncherView extends ItemView {
       const key = dateKey(date);
       const count = daily[key] || 0;
       const cell = grid.createDiv({ cls: "mal-cal-cell" });
-      cell.setText(String(day));
+      const isToday = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+      cell.setText(isToday ? "今日" : String(day));
       if (count > 0) cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
-      if (date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate()) {
-        cell.addClass("is-today");
-      }
+      if (isToday) cell.addClass("is-today");
       const wd = date.getDay();
       if (wd === 0 || wd === 6) cell.addClass("is-weekend");
-      cell.setAttribute("title", `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")} · ${count ? count + " 次启动" : "无启动记录"}`);
+      cell.setAttribute("title", `${key} · ${count ? count + " 次启动" : "无启动记录"}`);
     }
-    card.createDiv({ cls: "mal-cal-total", text: `本月共启动 ${total} 次 · 从最早有记录的一天开始累计` });
+
+    const totalEl = this.calLegend(nav);
+    totalEl.setText(`本月共 ${total} 次`);
+  }
+
+  // 图例 + 总计占位（放在标题行右侧，省出高度给日历网格）
+  calLegend(nav) {
+    const legend = nav.createDiv({ cls: "mal-cal-legend" });
+    legend.createDiv({ cls: "mal-cal-swatch is-on" });
+    legend.createDiv({ cls: "mal-cal-legend-text", text: "已启动" });
+    legend.createDiv({ cls: "mal-cal-swatch is-off" });
+    legend.createDiv({ cls: "mal-cal-legend-text", text: "无记录" });
+    return nav.createDiv({ cls: "mal-cal-total", text: "" });
+  }
+
+  // 全年视图：按周成列、周一至周日成行，底部标月份（类似 GitHub 贡献图）
+  renderYearMap(board, daily, totalEl) {
+    const WEEKS = 53;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const endMonday = new Date(today);
+    endMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const startMonday = new Date(endMonday);
+    startMonday.setDate(endMonday.getDate() - (WEEKS - 1) * 7);
+
+    const wrap = board.createDiv({ cls: "mal-cal-year-wrap" });
+    const grid = wrap.createDiv({ cls: "mal-cal-year-grid" });
+    const labels = wrap.createDiv({ cls: "mal-cal-year-labels" });
+    const labelCells = [];
+    let total = 0;
+    let prevMonth = -1;
+
+    for (let w = 0; w < WEEKS; w++) {
+      const monday = new Date(startMonday);
+      monday.setDate(startMonday.getDate() + w * 7);
+      labelCells.push(monday.getMonth() !== prevMonth ? `${monday.getMonth() + 1}月` : "");
+      prevMonth = monday.getMonth();
+
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(monday);
+        date.setDate(monday.getDate() + d);
+        const cell = grid.createDiv({ cls: "mal-cal-year-cell" });
+        if (date > today) {
+          cell.addClass("is-future");
+          continue;
+        }
+        const key = dateKey(date);
+        const count = daily[key] || 0;
+        total += count;
+        if (count > 0) cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
+        if (date.getTime() === today.getTime()) cell.addClass("is-today");
+        cell.setAttribute("title", `${key} · ${count ? count + " 次启动" : "无启动记录"}`);
+      }
+    }
+
+    for (const text of labelCells) labels.createDiv({ cls: "mal-cal-year-label", text });
+    totalEl.setText(`近一年共 ${total} 次`);
   }
 
 
@@ -1206,9 +1374,20 @@ class MacAppLauncherView extends ItemView {
     const filteredSearch = selected.filter(app =>
       `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
     );
+    // 搜索时按结果流式排列；无搜索词时走可拖拽、可缩放的自由布局
+    if (term || this.plugin.settings.homeFreeLayout === false) {
+      this.renderClassicHome(body, selected, filteredSearch, term);
+    } else {
+      this.renderFreeHome(body, selected, filteredSearch);
+    }
+
+    if (this.detailAppId) this.renderDetailPanel(body);
+  }
+
+  // 传统顺序排列（搜索状态、或关闭自由布局时使用）
+  renderClassicHome(body, selected, filteredSearch, term) {
     if (!term) {
-      const dash = this.renderDashboard(body);
-      this.renderActivityCalendar(dash || body);
+      this.renderDashboard(body);
       this.renderNoteBindings(body);
       this.renderNoteRecommendations(body);
     }
@@ -1235,14 +1414,6 @@ class MacAppLauncherView extends ItemView {
         body.createEl("p", { text: "这个分类下暂时没有应用。", cls: "mal-empty" });
       }
     } else {
-      // 最近启动条：无搜索词时显示最近用过的 8 个
-      if (!term) {
-        const recent = selected
-          .filter(app => app.lastLaunchedAt)
-          .sort((a, b) => (b.lastLaunchedAt || 0) - (a.lastLaunchedAt || 0))
-          .slice(0, 8);
-        if (recent.length) this.renderAppSection(body, "最近启动", recent, "🕘", true, true);
-      }
       const pinned = filteredSearch.filter(app => app.pinned);
       if (pinned.length) this.renderAppSection(body, "常用应用", pinned);
 
@@ -1254,8 +1425,223 @@ class MacAppLauncherView extends ItemView {
         if (items.length) this.renderAppSection(body, category, items);
       }
     }
+  }
 
-    if (this.detailAppId) this.renderDetailPanel(body);
+  // 首页模块清单：每个模块一个 id（分类分区按 cat:分类名 记录），自由布局按此顺序渲染
+  // autoHeight：模块高度按内容实际高度贴合，不留空白
+  buildHomeModules(selected, filteredSearch) {
+    const defs = [];
+    if (this.plugin.settings.showActivityCalendar !== false) {
+      defs.push({ id: "dashboard", w: 12, h: 6, autoHeight: true, render: target => this.renderDashboard(target) });
+    }
+    if (this.plugin.getNoteBindings()) {
+      defs.push({ id: "noteBindings", w: 12, h: 6, autoHeight: true, render: target => this.renderNoteBindings(target) });
+    }
+    if (this.plugin.getNoteRecommendations(4).length) {
+      defs.push({ id: "noteRecs", w: 12, h: 6, autoHeight: true, render: target => this.renderNoteRecommendations(target) });
+    }
+    defs.push({ id: "nav", w: 12, h: 2, autoHeight: true, render: target => this.renderCategoryNav(target, selected, "") });
+
+    if (!filteredSearch.length) return defs;
+
+    if (this.activeCategory !== "__all__") {
+      const categoryApps = filteredSearch.filter(app => app.category === this.activeCategory);
+      const pinned = categoryApps.filter(app => app.pinned);
+      const regular = categoryApps.filter(app => !app.pinned);
+      if (pinned.length) {
+        defs.push({ id: "pinned", w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, "常用应用", pinned) });
+      }
+      if (regular.length) {
+        const catId = this.activeCategory;
+        defs.push({ id: `cat:${catId}`, w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, catId, regular) });
+      }
+      return defs;
+    }
+
+    const pinned = filteredSearch.filter(app => app.pinned);
+    if (pinned.length) {
+      defs.push({ id: "pinned", w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, "常用应用", pinned) });
+    }
+
+    const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
+    const categories = [...new Set(filteredSearch.filter(app => !app.pinned).map(app => app.category || "未分类"))]
+      .sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999) || a.localeCompare(b, "zh-Hans-CN"));
+    for (const category of categories) {
+      const items = filteredSearch.filter(app => !app.pinned && (app.category || "未分类") === category);
+      if (items.length) {
+        defs.push({ id: `cat:${category}`, w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, category, items) });
+      }
+    }
+    return defs;
+  }
+
+  // 自由布局：12 列网格，模块可拖拽换位、拖右下角改宽高，顺序与尺寸写入配置
+  renderFreeHome(body, selected, filteredSearch) {
+    const defs = this.buildHomeModules(selected, filteredSearch);
+    const defMap = new Map(defs.map(def => [def.id, def]));
+    const settings = this.plugin.settings;
+    const layout = this.plugin.getHomeLayout();
+
+    // 渲染顺序：已保存的位置里当前存在的模块 + 新模块按默认尺寸追加到末尾
+    // 暂时不存在的模块（如没有笔记绑定）保留在配置里，回来时仍占原位
+    const ordered = layout.filter(item => defMap.has(item.id));
+    const merged = layout.slice();
+    for (const def of defs) {
+      if (!merged.some(item => item.id === def.id)) {
+        const fresh = { id: def.id, w: def.w, h: def.h };
+        if (def.autoHeight) fresh.autoHeight = true;
+        merged.push(fresh);
+        ordered.push(fresh);
+      }
+    }
+    if (merged.length !== layout.length) {
+      settings.homeLayout = merged;
+      this.plugin.saveSettings();
+    }
+
+    if (!filteredSearch.length) {
+      body.createEl("p", {
+        text: selected.length ? "没有匹配的应用。" : "还没有选择要展示的应用。点击“管理应用”选择软件。",
+        cls: "mal-empty"
+      });
+      return;
+    }
+
+    const grid = body.createDiv({ cls: "mal-home-grid" });
+    for (const item of ordered) {
+      const def = defMap.get(item.id);
+      const mod = grid.createDiv({ cls: "mal-mod", attr: { "data-module": item.id } });
+      mod.style.gridColumn = `span ${clampInt(item.w, 1, 12, 12)}`;
+      // 未手动调高过的模块：行高交给内容决定，天然贴合、不留空白
+      if (item.autoHeight === false) {
+        const fixed = item.hPx || (36 * clampInt(item.h, 1, 400, 6) - 12);
+        mod.style.height = `${fixed}px`;
+        mod.style.alignSelf = "start";
+      }
+      const content = mod.createDiv({ cls: "mal-mod-content" });
+      def.render(content);
+      this.attachModuleHandles(grid, mod, item);
+    }
+    this.makeGridDropTail(grid);
+
+    const foot = body.createDiv({ cls: "mal-layout-foot" });
+    foot.createDiv({ cls: "mal-layout-hint", text: "拖动模块右上角 ⠿ 换位，拖动右下角调整宽高（不拖高度时自动贴合内容）" });
+    const reset = foot.createEl("button", { text: "恢复默认布局", cls: "mal-nav-chip" });
+    reset.addEventListener("click", async () => {
+      await this.plugin.resetHomeLayout();
+      this.render();
+      new Notice("首页布局已恢复默认");
+    });
+  }
+
+  // 模块上的拖拽把手与缩放手柄
+  attachModuleHandles(grid, mod, item) {
+    const grip = mod.createDiv({ cls: "mal-mod-grip", text: "⠿", attr: { title: "按住拖动换位" } });
+    grip.setAttribute("draggable", "true");
+    grip.addEventListener("dragstart", event => {
+      event.dataTransfer.setData("application/x-mal-mod", item.id);
+      event.dataTransfer.effectAllowed = "move";
+      this.draggingModuleId = item.id;
+      mod.addClass("is-dragging");
+    });
+    grip.addEventListener("dragend", () => {
+      this.draggingModuleId = null;
+      mod.removeClass("is-dragging");
+      this.clearModuleDropTargets(grid);
+    });
+    mod.addEventListener("dragover", event => {
+      if (!this.draggingModuleId || this.draggingModuleId === item.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      this.clearModuleDropTargets(grid);
+      mod.addClass("is-drop-target");
+    });
+    mod.addEventListener("dragleave", event => {
+      if (event.relatedTarget && mod.contains(event.relatedTarget)) return;
+      mod.removeClass("is-drop-target");
+    });
+    mod.addEventListener("drop", async event => {
+      if (!this.draggingModuleId || this.draggingModuleId === item.id) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const dragged = this.draggingModuleId;
+      this.draggingModuleId = null;
+      this.clearModuleDropTargets(grid);
+      await this.plugin.moveHomeModule(dragged, item.id);
+      this.render();
+    });
+
+    const handle = mod.createDiv({ cls: "mal-mod-resize", attr: { title: "拖动调整宽高" } });
+    handle.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const styles = getComputedStyle(grid);
+      const gap = parseFloat(styles.columnGap) || 12;
+      const colWidth = Math.max(1, (grid.clientWidth - gap * 11) / 12);
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startW = mod.offsetWidth;
+      const startH = mod.offsetHeight;
+      const startW0 = item.w;
+      const startH0 = item.hPx || startH;
+      mod.addClass("is-resizing");
+      document.body.classList.add("mal-resizing");
+
+      const onMove = moveEvent => {
+        const width = startW + (moveEvent.clientX - startX);
+        const height = startH + (moveEvent.clientY - startY);
+        const w = clampInt((width + gap) / (colWidth + gap), 1, 12, item.w);
+        const hPx = Math.max(24, Math.round(height));
+        if (w === item.w && hPx === item.hPx) return;
+        item.autoHeight = false; // 手动改了高度，就不再自动贴合
+        item.w = w;
+        item.hPx = hPx;
+        item.h = clampInt((hPx + 12) / 36, 1, 400, item.h);
+        mod.style.gridColumn = `span ${w}`;
+        // 高度直接落到像素，缩放跟手，不留内部空白
+        mod.style.height = `${hPx}px`;
+        mod.style.alignSelf = "start";
+      };
+      const onUp = async () => {
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.body.classList.remove("mal-resizing");
+        mod.removeClass("is-resizing");
+        if (item.w !== startW0 || item.hPx !== startH0) await this.plugin.saveSettings();
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+    });
+  }
+
+  // 拖到网格空白处 = 排到末尾
+  makeGridDropTail(grid) {
+    grid.addEventListener("dragover", event => {
+      if (!this.draggingModuleId || event.target !== grid) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      grid.addClass("is-drop-end");
+    });
+    grid.addEventListener("dragleave", event => {
+      if (event.target === grid) grid.removeClass("is-drop-end");
+    });
+    grid.addEventListener("drop", async event => {
+      if (!this.draggingModuleId || event.target !== grid) return;
+      event.preventDefault();
+      const dragged = this.draggingModuleId;
+      this.draggingModuleId = null;
+      grid.removeClass("is-drop-end");
+      this.clearModuleDropTargets(grid);
+      await this.plugin.moveHomeModule(dragged, null);
+      this.render();
+    });
+  }
+
+  clearModuleDropTargets(grid) {
+    if (!grid) return;
+    grid.querySelectorAll(".mal-mod.is-drop-target").forEach(el => el.removeClass("is-drop-target"));
+    grid.removeClass("is-drop-end");
   }
 
   renderCategoryNav(body, selected, term) {
@@ -1263,13 +1649,10 @@ class MacAppLauncherView extends ItemView {
     const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
     const categories = [...new Set(selected.map(app => app.category || "未分类"))]
       .sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999) || a.localeCompare(b, "zh-Hans-CN"));
-    const buttons = [
-      { id: "__all__", label: `全部 ${selected.length}` },
-      ...categories.map(category => ({
-        id: category,
-        label: `${this.plugin.categoryIcon(category) ? this.plugin.categoryIcon(category) + " " : ""}${category} ${selected.filter(app => (app.category || "未分类") === category).length}`
-      }))
-    ];
+    const buttons = categories.map(category => ({
+      id: category,
+      label: `${this.plugin.categoryIcon(category) ? this.plugin.categoryIcon(category) + " " : ""}${category} ${selected.filter(app => (app.category || "未分类") === category).length}`
+    }));
 
     for (const item of buttons) {
       const button = nav.createEl("button", {
@@ -1277,30 +1660,27 @@ class MacAppLauncherView extends ItemView {
         cls: `mal-nav-chip ${this.activeCategory === item.id ? "is-active" : ""}`
       });
       button.addEventListener("click", () => {
-        this.activeCategory = item.id;
+        // 没有「全部」按钮：再点一次当前分类即取消筛选，回到全部
+        this.activeCategory = this.activeCategory === item.id ? "__all__" : item.id;
         this.detailAppId = null;
         this.render();
       });
       // 分类芯片本身可拖拽：左右换位即调整分类顺序
-      if (item.id !== "__all__") {
-        button.setAttribute("draggable", "true");
-        button.title = "点击筛选；按住拖动可调整分类顺序";
-        button.addEventListener("dragstart", event => {
-          event.dataTransfer.setData("application/x-mal-category", item.id);
-          event.dataTransfer.effectAllowed = "move";
-          button.addClass("is-dragging");
-        });
-        button.addEventListener("dragend", () => button.removeClass("is-dragging"));
-      }
+      button.setAttribute("draggable", "true");
+      button.title = "点击筛选，再点一次取消；按住拖动可调整分类顺序";
+      button.addEventListener("dragstart", event => {
+        event.dataTransfer.setData("application/x-mal-category", item.id);
+        event.dataTransfer.effectAllowed = "move";
+        button.addClass("is-dragging");
+      });
+      button.addEventListener("dragend", () => button.removeClass("is-dragging"));
       button.addEventListener("dragover", event => {
-        if (item.id === "__all__") return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
         button.addClass("is-drop-target");
       });
       button.addEventListener("dragleave", () => button.removeClass("is-drop-target"));
       button.addEventListener("drop", async event => {
-        if (item.id === "__all__") return;
         event.preventDefault();
         button.removeClass("is-drop-target");
         // 优先识别分类拖拽：拖到哪个芯片前就插到哪个分类前
@@ -1368,6 +1748,7 @@ class MacAppLauncherView extends ItemView {
   buildAppCard(app) {
     const card = document.createElement("div");
     card.className = "mal-app-card";
+    card.dataset.tile = `${app.tileW === 2 ? 2 : 1}x${app.tileH === 2 ? 2 : 1}`;
     card.setAttribute("draggable", "true");
     card.setAttribute("tabindex", "0");
     card.setAttribute("role", "button");
@@ -1376,19 +1757,7 @@ class MacAppLauncherView extends ItemView {
     this.observeIcon(icon, app);
     card.createDiv({ text: app.name, cls: "mal-app-name" });
 
-    const pin = card.createEl("button", {
-      text: app.pinned ? "★" : "☆",
-      cls: `mal-pin-btn ${app.pinned ? "is-pinned" : ""}`,
-      attr: { type: "button", title: app.pinned ? "取消置顶" : "置顶应用" }
-    });
-    pin.addEventListener("click", async event => {
-      event.stopPropagation();
-      await this.plugin.togglePin(app);
-      this.render();
-    });
-
     card.addEventListener("click", event => {
-      if (event.target.closest(".mal-pin-btn")) return;
       this.detailAppId = app.id;
       this.editingDetail = false;
       this.render();
@@ -1402,73 +1771,9 @@ class MacAppLauncherView extends ItemView {
       }
     });
 
-    card.addEventListener("contextmenu", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const menu = new Menu();
-      menu.addItem(item => item
-        .setTitle(`打开 ${app.name}`)
-        .setIcon("play")
-        .onClick(() => this.plugin.launchApp(app)));
-      menu.addItem(item => item
-        .setTitle(app.pinned ? "取消置顶" : "置顶应用")
-        .setIcon("pin")
-        .onClick(async () => {
-          await this.plugin.togglePin(app);
-          this.render();
-        }));
-      menu.addSeparator();
-      menu.addItem(item => item
-        .setTitle("在 Finder 中显示")
-        .setIcon("folder-open")
-        .onClick(() => this.plugin.revealInFinder(app)));
-      menu.addItem(item => item
-        .setTitle("复制应用路径")
-        .setIcon("copy")
-        .onClick(() => {
-          navigator.clipboard.writeText(app.path || "");
-          new Notice("已复制应用路径");
-        }));
-      menu.addItem(item => item
-        .setTitle("打开 / 创建应用笔记")
-        .setIcon("file-text")
-        .onClick(() => this.plugin.openAppNote(app)));
-      // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
-      if (this.plugin.isEditorApp(app)) {
-        menu.addItem(item => item
-          .setTitle(`用 ${app.name} 打开当前库`)
-          .setIcon("vault")
-          .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
-      }
-      if (this.plugin.isTerminalApp(app)) {
-        const note = this.plugin.getActiveNoteFile();
-        const dir = note && note.parent && note.parent.path
-          ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
-          : this.app.vault.adapter.getBasePath();
-        menu.addItem(item => item
-          .setTitle(`在 ${app.name} 中打开${note && note.parent && note.parent.path ? "笔记目录" : "库根目录"}`)
-          .setIcon("terminal")
-          .onClick(() => this.plugin.openPathWithApp(app, dir)));
-      }
-      if (app.custom) {
-        menu.addSeparator();
-        menu.addItem(item => item
-          .setTitle("移除应用")
-          .setIcon("trash")
-          .onClick(async () => {
-            await this.plugin.removeCustomApp(app);
-            new Notice(`已移除：${app.name}`);
-            this.render();
-          }));
-      }
-      menu.showAtMouseEvent(event);
-    });
+    card.addEventListener("contextmenu", event => this.openAppMenu(app, event));
 
     card.addEventListener("dragstart", event => {
-      if (event.target.closest(".mal-pin-btn")) {
-        event.preventDefault();
-        return;
-      }
       event.dataTransfer.setData("text/plain", app.id);
       event.dataTransfer.effectAllowed = "move";
       card.addClass("is-dragging");
@@ -1491,6 +1796,129 @@ class MacAppLauncherView extends ItemView {
     return card;
   }
 
+  // 应用右键菜单：首页磁贴、详情弹窗图标、管理列表图标共用同一套「设置与编辑」
+  openAppMenu(app, event) {
+    if (!event) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = new Menu();
+    menu.addItem(item => item
+      .setTitle(`打开 ${app.name}`)
+      .setIcon("play")
+      .onClick(() => this.plugin.launchApp(app)));
+    menu.addItem(item => item
+      .setTitle(`布局：${app.tileW === 2 ? 2 : 1}×${app.tileH === 2 ? 2 : 1}`)
+      .setIcon("layout-grid")
+      .onClick(() => {
+        // 二级菜单：四个磁贴尺寸，当前尺寸打勾
+        const layoutMenu = new Menu();
+        [
+          [1, 1, "1×1 方形"],
+          [2, 1, "2×1 横向"],
+          [1, 2, "1×2 竖向"],
+          [2, 2, "2×2 大方块"]
+        ].forEach(([w, h, label]) => {
+          const checked = (app.tileW === 2 ? 2 : 1) === w && (app.tileH === 2 ? 2 : 1) === h;
+          layoutMenu.addItem(entry => entry
+            .setTitle(`${checked ? "✓ " : ""}${label}`)
+            .onClick(async () => {
+              app.tileW = w;
+              app.tileH = h;
+              await this.plugin.saveSettings();
+              this.render();
+            }));
+        });
+        setTimeout(() => layoutMenu.showAtPosition({ x: event.clientX, y: event.clientY }), 0);
+      }));
+    menu.addItem(item => item
+      .setTitle(app.customIcon ? "更换图标…" : "编辑图标…")
+      .setIcon("image")
+      .onClick(async () => {
+        const ok = await this.plugin.pickAppIcon(app);
+        if (ok) this.render();
+      }));
+    if (app.customIcon) {
+      menu.addItem(item => item
+        .setTitle("恢复默认图标")
+        .setIcon("rotate-ccw")
+        .onClick(async () => {
+          await this.plugin.resetAppIcon(app);
+          this.render();
+        }));
+    }
+    menu.addItem(item => item
+      .setTitle("编辑主页")
+      .setIcon("pencil")
+      .onClick(() => {
+        this.detailAppId = app.id;
+        this.editingDetail = true;
+        this.render();
+      }));
+    menu.addItem(item => item
+      .setTitle(app.pinned ? "取消置顶" : "置顶应用")
+      .setIcon("pin")
+      .onClick(async () => {
+        await this.plugin.togglePin(app);
+        this.render();
+      }));
+    menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle("在 Finder 中显示")
+      .setIcon("folder-open")
+      .onClick(() => this.plugin.revealInFinder(app)));
+    menu.addItem(item => item
+      .setTitle("复制应用路径")
+      .setIcon("copy")
+      .onClick(() => {
+        navigator.clipboard.writeText(app.path || "");
+        new Notice("已复制应用路径");
+      }));
+    menu.addItem(item => item
+      .setTitle("打开 / 创建应用笔记")
+      .setIcon("file-text")
+      .onClick(() => this.plugin.openAppNote(app)));
+    // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
+    if (this.plugin.isEditorApp(app)) {
+      menu.addItem(item => item
+        .setTitle(`用 ${app.name} 打开当前库`)
+        .setIcon("vault")
+        .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
+    }
+    if (this.plugin.isTerminalApp(app)) {
+      const note = this.plugin.getActiveNoteFile();
+      const dir = note && note.parent && note.parent.path
+        ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
+        : this.app.vault.adapter.getBasePath();
+      menu.addItem(item => item
+        .setTitle(`在 ${app.name} 中打开${note && note.parent && note.parent.path ? "笔记目录" : "库根目录"}`)
+        .setIcon("terminal")
+        .onClick(() => this.plugin.openPathWithApp(app, dir)));
+    }
+    if (app.custom) {
+      menu.addSeparator();
+      menu.addItem(item => item
+        .setTitle("移除应用")
+        .setIcon("trash")
+        .onClick(async () => {
+          await this.plugin.removeCustomApp(app);
+          new Notice(`已移除：${app.name}`);
+          this.render();
+        }));
+    } else {
+      menu.addSeparator();
+      menu.addItem(item => item
+        .setTitle("从首页隐藏")
+        .setIcon("eye-off")
+        .onClick(async () => {
+          app.selected = false;
+          await this.plugin.saveSettings();
+          new Notice(`已从首页隐藏：${app.name}（可在「管理应用」里重新勾选）`);
+          this.render();
+        }));
+    }
+    menu.showAtMouseEvent(event);
+  }
+
   renderDetailPanel(body) {
     const app = this.plugin.settings.apps.find(item => item.id === this.detailAppId);
     if (!app) {
@@ -1510,7 +1938,9 @@ class MacAppLauncherView extends ItemView {
     const top = panel.createDiv({ cls: "mal-detail-top" });
     const identity = top.createDiv({ cls: "mal-detail-identity" });
     const icon = identity.createDiv({ cls: "mal-detail-icon" });
+    icon.setAttribute("title", "右键可设置 / 编辑图标与布局");
     this.plugin.renderAppIcon(icon, app);
+    icon.addEventListener("contextmenu", event => this.openAppMenu(app, event));
     const names = identity.createDiv({ cls: "mal-detail-names" });
     names.createEl("h3", { text: app.name });
     names.createEl("div", { text: `${app.category || "未分类"} · ${app.path}`, cls: "mal-detail-meta" });
@@ -1777,7 +2207,9 @@ class MacAppLauncherView extends ItemView {
       checkbox.addEventListener("change", () => setSelected(checkbox.checked));
 
       const icon = row.createDiv({ cls: "mal-manage-icon" });
+      icon.setAttribute("title", "右键可设置 / 编辑图标与布局");
       this.observeIcon(icon, app);
+      icon.addEventListener("contextmenu", event => this.openAppMenu(app, event));
 
       const info = row.createDiv({ cls: "mal-app-info" });
       // 点图标或名称区域也能切换「展示」，避免误点旁边的批量选择框
@@ -2601,6 +3033,19 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
         this.plugin.refreshViews();
       }));
 
+    new Setting(containerEl)
+      .setName("首页自由布局")
+      .setDesc("首页模块（仪表板、笔记绑定、每个分类分区）可拖动换位、拖动右下角调整宽高，布局自动保存。关闭后按内容顺序排列。")
+      .addToggle(tg => tg.setValue(this.plugin.settings.homeFreeLayout !== false).onChange(async v => {
+        this.plugin.settings.homeFreeLayout = v;
+        await this.plugin.saveSettings();
+        this.plugin.refreshViews();
+      }))
+      .addButton(btn => btn.setButtonText("恢复默认布局").onClick(async () => {
+        await this.plugin.resetHomeLayout();
+        new Notice("首页布局已恢复默认");
+      }));
+
     // ── 维护：调试日志与历史清理 ──
     containerEl.createDiv({ cls: "mal-settings-group", text: "维护" });
 
@@ -2768,8 +3213,44 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       showActivityCalendar: loaded.showActivityCalendar !== false,
       weatherCity: typeof loaded.weatherCity === "string" ? loaded.weatherCity : "",
       launchDaily: loaded.launchDaily && typeof loaded.launchDaily === "object" ? loaded.launchDaily : {},
+      // 首页自由布局：模块顺序与宽高（12 列网格；autoHeight 未关闭时高度贴合内容）
+      homeFreeLayout: loaded.homeFreeLayout !== false,
+      homeLayout: Array.isArray(loaded.homeLayout)
+        ? loaded.homeLayout
+            .filter(item => item && typeof item.id === "string" && item.id)
+            .reduce((list, item) => {
+              if (!list.some(entry => entry.id === item.id)) {
+                const entry = {
+                  id: item.id,
+                  w: clampInt(item.w, 1, 12, 12),
+                  h: clampInt(item.h, 1, 400, 6),
+                  autoHeight: item.autoHeight !== false
+                };
+                if (!entry.autoHeight) {
+                  entry.hPx = clampInt(item.hPx, 24, 4000, 36 * entry.h - 12);
+                }
+                list.push(entry);
+              }
+              return list;
+            }, [])
+        : [],
       debugLog: loaded.debugLog === true
     };
+    // 首页模块统一高度自适应：旧配置补标记（此前手动调过高度的保留固定像素）
+    {
+      let changed = false;
+      for (const item of this.settings.homeLayout) {
+        if (item.autoHeight === undefined) {
+          item.autoHeight = true;
+          changed = true;
+        }
+        if (item.autoHeight === false && !item.hPx) {
+          item.hPx = 36 * clampInt(item.h, 1, 400, 6) - 12;
+          changed = true;
+        }
+      }
+      if (changed) await this.saveSettings();
+    }
     this.weatherCache = null;
     this.weatherPromise = null;
     this.holidayCache = null;
@@ -4001,6 +4482,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
             usage: old?.usage || suggested.usage,
             iconPath: old?.iconPath && fs.existsSync(old.iconPath) ? old.iconPath : "",
             iconSource: info.iconSource || old?.iconSource || "",
+            customIcon: !!old?.customIcon,
+            tileW: old?.tileW,
+            tileH: old?.tileH,
             launchCount: old?.launchCount || 0,
             lastLaunchedAt: old?.lastLaunchedAt || null,
             // 用户绑定数据必须跨重扫保留：关联笔记、置顶顺序、快捷键
@@ -4585,6 +5069,68 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     }
   }
 
+  // 用 macOS 原生面板挑图标图片（PNG / JPG / ICNS 等）
+  async pickImageFile() {
+    try {
+      const out = await execFileAsync("osascript", [
+        "-e", 'choose file with prompt "选择图标图片（PNG / JPG / ICNS）" of type {"public.image"}',
+        "-e", "return POSIX path of result"
+      ]);
+      return String(out || "").trim();
+    } catch (error) {
+      const text = `${(error && error.stderr) || ""}${(error && error.message) || ""}`;
+      if (text.includes("-128")) return "";
+      throw error;
+    }
+  }
+
+  // 编辑图标：把用户选的图片转成 256px PNG，存进插件 icons 目录并指向它
+  async pickAppIcon(app) {
+    let picked = "";
+    try {
+      picked = await this.pickImageFile();
+    } catch (error) {
+      new Notice("无法打开图片选择器，请重试");
+      return false;
+    }
+    if (!picked) return false;
+    if (!fs.existsSync(picked)) {
+      new Notice("找不到该图片文件");
+      return false;
+    }
+    try {
+      const iconsDir = path.join(this.getPluginDirectory(), "icons");
+      fs.mkdirSync(iconsDir, { recursive: true });
+      const output = path.join(iconsDir, `custom-${app.id}.png`);
+      await execFileAsync("/usr/bin/sips", [
+        "-s", "format", "png", "-Z", "256", picked, "--out", output
+      ], { timeout: 15000 });
+      if (!fs.existsSync(output)) throw new Error("icon conversion failed");
+      app.iconPath = output;
+      app.customIcon = true;
+      this.iconCache.invalidate(app.id);
+      await this.saveSettings();
+      this.refreshViews();
+      new Notice(`已更新 ${app.name} 的图标`);
+      return true;
+    } catch (error) {
+      console.warn("[Mac App Launcher] custom icon failed", app.name, error);
+      new Notice("图标转换失败，请换一张 PNG / JPG 图片");
+      return false;
+    }
+  }
+
+  // 恢复默认图标：清掉自定义路径，按系统图标重新提取
+  async resetAppIcon(app) {
+    app.customIcon = false;
+    app.iconPath = "";
+    this.iconCache.invalidate(app.id);
+    await this.saveSettings();
+    await this.ensureIcon(app);
+    this.refreshViews();
+    new Notice(`已恢复 ${app.name} 的默认图标`);
+  }
+
   // 手动添加应用：支持任意路径的 .app（Parallels、自编译等扫描不到的应用）
   async addCustomApp(appPath, category) {
     const trimmed = (appPath || "").trim();
@@ -4620,6 +5166,31 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     this.refreshViews();
     this.buildPinyin([app]);
     return { ok: true, app };
+  }
+
+  // ---- 首页自由布局 ----
+  getHomeLayout() {
+    if (!Array.isArray(this.settings.homeLayout)) this.settings.homeLayout = [];
+    return this.settings.homeLayout;
+  }
+
+  // 把模块拖到目标模块之前（beforeId 为空则排到末尾）
+  async moveHomeModule(id, beforeId) {
+    const items = this.getHomeLayout();
+    const from = items.findIndex(item => item.id === id);
+    if (from < 0 || id === beforeId) return false;
+    const [item] = items.splice(from, 1);
+    const to = beforeId ? items.findIndex(entry => entry.id === beforeId) : -1;
+    if (to >= 0) items.splice(to, 0, item);
+    else items.push(item);
+    await this.saveSettings();
+    return true;
+  }
+
+  async resetHomeLayout() {
+    this.settings.homeLayout = [];
+    await this.saveSettings();
+    this.refreshViews();
   }
 
   // ---- 分类管理 ----
