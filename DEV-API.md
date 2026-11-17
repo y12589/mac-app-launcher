@@ -24,9 +24,13 @@ Mac App Launcher 向 Obsidian 全局暴露 `window.MacAppLauncher`，供 QuickAd
 
 ```js
 {
-  id: "a1b2c3...",           // 稳定 id（路径哈希）
+  id: "a1b2c3...",           // 稳定 id（首次扫描路径哈希；重扫时尽量按 Bundle ID 保留）
   name: "微信",
   path: "/Applications/WeChat.app",
+  bundleId: "com.tencent.xinWeChat",
+  websiteUrl: "https://example.com",
+  installed: true,
+  webOnly: false,             // true 表示这是纯网页应用资源
   category: "办公工具",
   pinned: false,
   custom: false,              // 是否手动添加
@@ -45,7 +49,7 @@ Mac App Launcher 向 Obsidian 全局暴露 `window.MacAppLauncher`，供 QuickAd
 
 | 事件 | payload |
 |---|---|
-| `"app-launched"` | `{ id, name, category }` |
+| `"app-launched"` | `{ id, name, category, mode }`，mode 为 `client` 或 `web` |
 | `"scene-launched"` | `{ id, name, launched, opened, commands, skippedRunning, failed }` |
 
 `on()` 返回退订函数，插件卸载时建议退订；监听器抛异常不会影响主流程。

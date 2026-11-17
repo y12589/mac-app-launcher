@@ -5,9 +5,13 @@ dist/
 
 # 用户本地配置（含 agentTokenHash、apps 列表、运行时数据）
 data.json
+data.json.v*.bak
 
 # 动态生成的应用图标缓存
 icons/
+
+# 本地节假日缓存
+holidays/
 
 # 编译产物
 pinyin-helper

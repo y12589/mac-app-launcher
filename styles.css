@@ -14,7 +14,7 @@
 .mal-search{min-width:180px;max-width:250px}
 .mal-primary{background:var(--interactive-accent);color:var(--text-on-accent);border-color:var(--interactive-accent)}
 /* 首页顶部 Hero：大时钟 + 日期 + 胶囊搜索（参考桌面启动器的自然排法） */
-.mal-hero{display:flex;flex-direction:column;align-items:center;gap:6px;margin:6px 0 24px;padding:16px 12px 8px}
+.mal-hero{display:flex;flex-direction:column;align-items:center;gap:6px;max-width:1060px;margin:6px auto 24px;padding:16px 12px 8px}
 .mal-hero-clock{font-size:58px;font-weight:200;letter-spacing:1px;line-height:1.04;color:var(--text-normal);font-variant-numeric:tabular-nums}
 .mal-hero-date{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:center;font-size:var(--font-smaller);color:var(--text-muted)}
 .mal-hero-week,.mal-hero-lunar{color:var(--text-faint)}
@@ -442,7 +442,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 
 /* ===== 视觉打磨：统一节奏、层次与细节 ===== */
 /* Hero：时钟做轻微渐变收光，日期用细圆点分隔，搜索框浮起并有聚焦光晕 */
-.mal-hero{margin:4px 0 26px;padding:20px 12px 8px}
+.mal-hero{margin:4px auto 26px;padding:20px 12px 8px}
 .mal-hero-clock{font-size:62px;font-weight:200;letter-spacing:-.012em;background:linear-gradient(180deg,var(--text-normal) 12%,color-mix(in srgb,var(--text-normal) 62%,transparent));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .mal-hero-date{gap:0;font-size:12px;letter-spacing:.02em}
 .mal-hero-date>span+span::before{content:"·";margin:0 8px;color:var(--text-faint);opacity:.55}
@@ -512,7 +512,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 
 /* ===== 视觉升级：macOS + Linear + 轻玻璃（统一覆盖层） ===== */
 /* 顶部：时钟收敛，日期行更紧凑 */
-.mal-hero{padding:12px 12px 4px;margin:0 0 16px;gap:5px}
+.mal-hero{padding:12px 12px 4px;margin:0 auto 16px;gap:5px}
 .mal-hero-clock{font-size:46px;font-weight:260;letter-spacing:.3px;line-height:1}
 .mal-hero-date{gap:8px;font-size:11.5px;margin-top:1px}
 .mal-hero-daytype{padding:0 7px;font-size:10px}
@@ -651,12 +651,18 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .theme-dark .mal-shelf-card.is-claimed .mal-shelf-meta{color:#38bdf8}
 .mal-album-divider{height:1px;margin:0 0 18px;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--background-modifier-border) 90%,transparent),transparent)}
 
-/* ===== 首页三栏工作区：算力 1/5 · 常用应用 3/5 · 月历 1/5 ===== */
-.mal-workspace{display:grid;grid-template-columns:1fr 3fr 1fr;gap:12px;align-items:stretch;margin:0 0 20px}
+/* ===== 首页工作区：卡册入口 + 常用应用 + 自定义入口卡，三块等宽 ===== */
+.mal-workspace{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px;align-items:stretch;max-width:1060px;margin:0 auto 20px}
 .mal-ws-col{min-width:0;display:flex;flex-direction:column;padding:14px 15px;box-sizing:border-box;border:1px solid color-mix(in srgb,var(--background-modifier-border) 50%,transparent);border-radius:16px;background:color-mix(in srgb,var(--background-primary) 60%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 30px -26px rgba(15,23,42,.5)}
 .mal-ws-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 9px}
 .mal-ws-title{font-size:12px;font-weight:650;color:var(--text-normal)}
 .mal-ws-sub{font-size:10.5px;color:var(--text-faint);white-space:nowrap}
+/* 常用应用图标随列宽等比缩放，不溢出、不换行 */
+.mal-home-apps-grid{align-content:center}
+.mal-home-apps-grid .mal-quick-icon{width:100%;max-width:42px;height:auto;aspect-ratio:1;justify-self:center}
+.mal-home-apps-grid .mal-quick-icon .mal-native-icon{width:100%;height:100%}
+/* 三栏内：栏目本身已是卡片，去掉常用应用自己那层边框与背景，避免嵌套 */
+.mal-ws-col .mal-home-apps{flex:1 1 auto;margin:0;padding:0;border:none;background:none;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
 .mal-ws-left .mal-album-entry{flex:1 1 auto;width:100%;min-height:0;padding:0;border:0;background:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
 .mal-ws-left .mal-album-entry:hover{transform:none;box-shadow:none;border-color:transparent}
 .mal-ws-left .mal-album-entry::after{display:none}
@@ -683,9 +689,8 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .theme-dark .mal-mini-cell.mal-cal-l1,.theme-dark .mal-mini-cell.mal-cal-l2,.theme-dark .mal-mini-cell.mal-cal-l3,.theme-dark .mal-mini-cell.mal-cal-l4{color:#0b1220}
 .mal-mini-foot{margin-top:9px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--background-modifier-border) 55%,transparent);font-size:10px;color:var(--text-faint);text-align:center}
 
-@media(max-width:1000px){.mal-workspace{grid-template-columns:1fr 1fr}
-  .mal-ws-mid{order:1;grid-column:span 2}.mal-ws-left{order:2}.mal-ws-entry{order:3}}
-@media(max-width:680px){.mal-workspace{grid-template-columns:1fr}.mal-ws-mid{grid-column:auto}}
+@media(max-width:1000px){.mal-workspace{grid-template-columns:1fr}}
+@media(max-width:680px){.mal-workspace{grid-template-columns:1fr}}
 
 /* 常用应用：固定 6 列 × 2 行更整齐，图标略放大 */
 .mal-quick-grid{grid-template-columns:repeat(6,1fr);gap:10px 6px}
@@ -733,9 +738,9 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-ws-grip.is-dragging{opacity:1;cursor:grabbing}
 .mal-ws-col.is-ws-drop{outline:2px dashed color-mix(in srgb,#0ea5e9 55%,transparent);outline-offset:-3px}
 
-/* 握柄与标题错开，窄屏强制两列（覆盖内联列宽） */
+/* 握柄与标题错开，窄屏保持单列（覆盖内联列宽） */
 .mal-ws-col>.mal-ws-head{padding-right:15px}
-@media(max-width:1000px){.mal-workspace{grid-template-columns:1fr 1fr !important}}
+@media(max-width:1000px){.mal-workspace{grid-template-columns:1fr !important}}
 @media(max-width:680px){.mal-workspace{grid-template-columns:1fr !important}}
 
 /* 自定义入口（单条）：浅色玻璃底内居中，与算力卡、常用应用同一套材质 */
@@ -748,6 +753,87 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-entry-single .mal-entry-sub:empty{display:none}
 .theme-dark .mal-entry-single:hover .mal-entry-title{color:#38bdf8}
 
+/* 自定义链接区：2×2 网格，空格显示 +，点开对应网址 */
+.mal-entry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:1;align-content:center}
+.mal-entry-single{min-height:64px}
+.mal-entry-slot{background:color-mix(in srgb,var(--background-modifier-border) 24%,transparent);border:1px dashed var(--background-modifier-border);color:var(--text-faint)}
+.mal-entry-slot:hover{background:color-mix(in srgb,#0ea5e9 10%,transparent);color:#0284c7;border-color:color-mix(in srgb,#0ea5e9 40%,transparent)}
+.theme-dark .mal-entry-slot:hover{color:#7dd3fc}
+.mal-entry-plus{font-size:24px;line-height:1;font-weight:300}
+/* 快捷入口图片图标（前台） */
+.mal-entry-img{width:26px;height:26px;object-fit:contain;border-radius:6px}
+/* 编辑弹窗里的缩略图与预览 */
+.mal-entry-thumb{width:22px;height:22px;object-fit:contain;border-radius:5px;flex:0 0 auto}
+.mal-entry-label-emoji{font-size:16px;line-height:1;flex:0 0 auto}
+.mal-entry-preview{display:flex;align-items:center;margin:4px 0 8px}
+.mal-entry-preview img{width:36px;height:36px;object-fit:contain;border-radius:8px}
+/* 右侧广告位：两行一列 */
+.mal-ad-list{display:flex;flex-direction:column;gap:8px;flex:1;justify-content:center}
+.mal-ad-slot{display:flex;align-items:center;justify-content:center;border-radius:12px;overflow:hidden;cursor:pointer;min-height:70px;background:color-mix(in srgb,var(--background-modifier-border) 18%,transparent);transition:transform 140ms ease,box-shadow 140ms ease}
+.mal-ad-slot:hover{transform:translateY(-1px);box-shadow:0 8px 20px -14px rgba(15,23,42,.5)}
+.mal-ad-img{width:100%;height:100%;object-fit:cover;display:block}
+.mal-ad-empty{border:1px dashed var(--background-modifier-border);color:var(--text-faint)}
+.mal-ad-empty:hover{background:color-mix(in srgb,#0ea5e9 10%,transparent);color:#0284c7}
+.theme-dark .mal-ad-empty:hover{color:#7dd3fc}
+.mal-entry-add{margin-top:10px;padding:6px 10px;border:1px dashed var(--background-modifier-border);border-radius:10px;background:transparent;color:var(--text-muted);font-size:11px;cursor:pointer;transition:color 140ms ease,border-color 140ms ease}
+.mal-entry-add:hover{color:#0284c7;border-color:color-mix(in srgb,#0ea5e9 45%,transparent)}
+.theme-dark .mal-entry-add:hover{color:#7dd3fc}
+/* 自定义链接编辑弹窗 */
+.mal-entry-edit-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 12px}
+.mal-entry-edit-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--background-modifier-border);border-radius:10px}
+.mal-entry-edit-label{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:12px;overflow:hidden}
+.mal-entry-edit-label .mal-muted{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mal-entry-form{display:flex;flex-direction:column;gap:4px;padding:10px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 70%,transparent);border-radius:12px}
+.mal-entry-back{align-self:flex-start;margin-top:6px;padding:5px 10px;border:1px solid var(--background-modifier-border);border-radius:8px;background:transparent;color:var(--text-muted);font-size:11px;cursor:pointer}
+.mal-danger-text{color:var(--text-error)}
+
 /* 卡册卡片：已检测到本地客户端的小标记 */
 .mal-album-row-chip.is-client{border-color:transparent;background:color-mix(in srgb,#0ea5e9 12%,transparent);color:#0284c7;font-weight:600}
 .theme-dark .mal-album-row-chip.is-client{background:color-mix(in srgb,#38bdf8 16%,transparent);color:#7dd3fc}
+
+
+/* ===== 1.28.0：统一应用资源与福利卡册 ===== */
+.mal-album-row.is-expired{opacity:.62;filter:saturate(.72)}
+.mal-shelf-card.is-expired{opacity:.58;filter:saturate(.65)}
+.mal-album-row-chip.is-web{background:color-mix(in srgb,#64748b 11%,var(--background-primary));color:var(--text-muted)}
+.mal-compute-enabled-row{display:flex;align-items:center;gap:9px;margin:10px 0 4px;color:var(--text-normal);font-size:13px}
+.mal-compute-enabled-row input{accent-color:var(--interactive-accent)}
+.mal-compute-confirm-detail{border-color:color-mix(in srgb,#10b981 45%,var(--background-modifier-border))!important}
+.mal-compute-history{margin:16px 0;padding:12px 14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
+.mal-compute-history-row{display:grid;grid-template-columns:minmax(90px,1fr) 54px minmax(110px,auto);gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--background-modifier-border)}
+.mal-compute-history-row:last-child{border-bottom:0}
+.mal-compute-history-date{font-size:12px;color:var(--text-normal);font-variant-numeric:tabular-nums}
+.mal-compute-history-period{font-size:11px;color:var(--text-muted)}
+.mal-compute-history-value{font-size:11px;color:var(--text-muted);text-align:right}
+.mal-app-linked-benefits{display:flex;flex-direction:column;gap:7px;margin:8px 0 12px}
+.mal-app-linked-benefit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:10px;background:var(--background-secondary)}
+.mal-app-linked-benefit-info{min-width:0;flex:1}
+.mal-app-linked-benefit-title{font-size:12px;font-weight:600;color:var(--text-normal);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mal-app-path{overflow-wrap:anywhere}
+.mal-detail-note-row .mal-detail-meta{min-width:0;overflow-wrap:anywhere}
+@media(max-width:640px){
+  .mal-compute-history-row{grid-template-columns:1fr 46px;gap:4px}
+  .mal-compute-history-value{grid-column:1/-1;text-align:left}
+  .mal-app-linked-benefit{align-items:flex-start}
+}
+
+.mal-add-custom-web-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;border:1px dashed var(--background-modifier-border);border-radius:11px}
+.mal-add-custom-web-row .mal-add-custom-hint{flex:1;min-width:220px;font-size:11px;line-height:1.5}
+
+/* ===== 1.30.0 首页：常用应用快捷栏 + 算力卡册主体 ===== */
+.mal-home-apps{max-width:1060px;margin:0 auto 18px;padding:12px 15px 10px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 62%,transparent);border-radius:16px;background:color-mix(in srgb,var(--background-primary) 78%,transparent);-webkit-backdrop-filter:blur(12px) saturate(1.12);backdrop-filter:blur(12px) saturate(1.12);box-shadow:0 1px 0 rgba(255,255,255,.42) inset,0 10px 26px -24px rgba(15,23,42,.42)}
+.mal-home-apps-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 7px}
+.mal-home-apps-title{display:flex;align-items:baseline;gap:9px;font-size:12px;font-weight:700;color:var(--text-normal)}
+.mal-home-apps-count{font-size:10px;font-weight:500;color:var(--text-faint);font-variant-numeric:tabular-nums}
+.mal-home-apps-manage{padding:4px 9px;border:1px solid var(--background-modifier-border);border-radius:999px;background:var(--background-primary);color:var(--text-muted);font-size:10px;cursor:pointer}
+.mal-home-apps-manage:hover{color:var(--text-normal);border-color:var(--text-faint);background:var(--background-secondary)}
+.mal-home-apps-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;flex:none}
+.mal-home-apps-grid .mal-home-quick-app{min-width:0;padding:7px 4px 5px;outline:none}
+.mal-home-apps-grid .mal-quick-icon,.mal-home-apps-grid .mal-quick-icon .mal-native-icon{width:38px;height:38px}
+.mal-home-apps-grid .mal-quick-name{max-width:100%;font-size:10px}
+.mal-home-quick-app.is-kb-active{background:color-mix(in srgb,#0ea5e9 10%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,#0ea5e9 45%,transparent),0 8px 20px -16px rgba(15,23,42,.5)}
+.mal-home-quick-app.is-kb-active .mal-quick-name{color:var(--text-normal);font-weight:650}
+.mal-home-apps-empty{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:9px;min-height:52px;color:var(--text-faint);font-size:11px}
+.mal-home-apps-empty .mal-home-apps-manage{white-space:nowrap}
+.mal-home-apps-grid .mal-quick-app.is-pinned{cursor:grab}
+@media(max-width:680px){.mal-home-apps{padding:10px 10px 8px;margin-bottom:14px}.mal-home-apps-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}.mal-home-apps-grid .mal-quick-icon,.mal-home-apps-grid .mal-quick-icon .mal-native-icon{width:34px;height:34px}.mal-home-apps-grid .mal-quick-name{font-size:9px}}

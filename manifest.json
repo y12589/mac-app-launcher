@@ -1,1 +1,9 @@
-{"id":"mac-app-launcher","name":"Mac App Launcher","version":"1.27.1","minAppVersion":"1.13.0","description":"macOS 应用工作台：本地应用管理、分类启动、场景工作流、Obsidian 深度联动，以及共享应用资源的算力福利卡册（客户端/网页双向入口、人工确认打卡）。","author":"阎大大","isDesktopOnly":true}
+{
+  "id": "mac-app-launcher",
+  "name": "Mac App Launcher",
+  "version": "1.31.0",
+  "minAppVersion": "1.13.0",
+  "description": "macOS 应用快捷启动与算力福利卡册：顶部常用应用，首页集中管理福利领取与历史记录。",
+  "author": "阎大大",
+  "isDesktopOnly": true
+}

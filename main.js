@@ -97,11 +97,232 @@ function migrateComputeCardAppLinks(cards, apps) {
   return changed;
 }
 
+function isValidDateKey(value) {
+  const key = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const parsed = new Date(`${key}T12:00:00`);
+  return Number.isFinite(parsed.getTime()) && dateKey(parsed) === key;
+}
+
+function normalizeComputeCard(card, index = 0) {
+  const source = card && typeof card === "object" ? card : {};
+  const amount = Number(source.amount);
+  const cycle = ["once", "daily", "monthly"].includes(source.cycle) ? source.cycle : "daily";
+  return {
+    ...source,
+    id: String(source.id || `compute-${crypto.createHash("sha1").update(`${source.name || "福利"}|${source.group || "自定义"}|${index}`).digest("hex").slice(0, 12)}`),
+    name: String(source.name || "未命名福利"),
+    group: String(source.group || "自定义"),
+    cycle,
+    value: String(source.value || ""),
+    amount: Number.isFinite(amount) && amount >= 0 ? amount : 0,
+    currency: String(source.currency || "CNY"),
+    url: String(source.url || ""),
+    appId: String(source.appId || ""),
+    appMatch: String(source.appMatch || ""),
+    desc: String(source.desc || ""),
+    emoji: String(source.emoji || "⚡"),
+    color: /^#[0-9a-f]{6}$/i.test(String(source.color || "")) ? source.color : "#0ea5e9",
+    validFrom: isValidDateKey(source.validFrom) ? source.validFrom : "",
+    validUntil: isValidDateKey(source.validUntil) ? source.validUntil : "",
+    enabled: source.enabled !== false
+  };
+}
+
+function hasOwnField(object, key) {
+  return !!object && Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function isSystemAppPath(value) {
+  const appPath = String(value && typeof value === "object" ? value.path || "" : value || "");
+  return appPath.includes("/System/");
+}
+
+function isWebOnlyApp(app) {
+  return !!app && !String(app.path || "") && !!app.webOnly && !isSystemAppPath(app.path);
+}
+
+function normalizeClaimRecord(record, index = 0) {
+  const source = record && typeof record === "object" ? record : {};
+  // 保留旧记录的所有扩展字段；只规范已有字段，不用当前时间/卡片 ID 猜测缺失历史。
+  const result = { ...source };
+  if (!hasOwnField(source, "id") || source.id === undefined || source.id === null || source.id === "") {
+    const stableCardId = String(source.cardId || "orphan");
+    const stablePeriod = String(source.periodKey || index);
+    result.id = `claim-${stableCardId}-${stablePeriod}-${index}`;
+  } else {
+    result.id = String(source.id);
+  }
+  if (hasOwnField(source, "cardId") && source.cardId !== undefined && source.cardId !== null) {
+    result.cardId = String(source.cardId);
+  }
+  if (hasOwnField(source, "periodKey") && source.periodKey !== undefined && source.periodKey !== null) {
+    result.periodKey = String(source.periodKey);
+  }
+  if (hasOwnField(source, "claimedAt") && source.claimedAt !== undefined && source.claimedAt !== null && source.claimedAt !== "") {
+    const claimedAt = Number(source.claimedAt);
+    result.claimedAt = Number.isFinite(claimedAt) && claimedAt > 0 ? claimedAt : source.claimedAt;
+  }
+  if (hasOwnField(source, "amountSnapshot") && source.amountSnapshot !== undefined && source.amountSnapshot !== null) {
+    const amount = Number(source.amountSnapshot);
+    if (Number.isFinite(amount) && amount >= 0) result.amountSnapshot = amount;
+  }
+  if (hasOwnField(source, "valueSnapshot") && source.valueSnapshot !== undefined && source.valueSnapshot !== null) {
+    result.valueSnapshot = String(source.valueSnapshot);
+  }
+  if (hasOwnField(source, "currency") && source.currency !== undefined && source.currency !== null) {
+    result.currency = String(source.currency);
+  }
+  if (hasOwnField(source, "source") && source.source !== undefined && source.source !== null) {
+    result.source = String(source.source);
+  }
+  return result;
+}
+
+function claimTimestamp(record) {
+  const numeric = Number(record && record.claimedAt);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(String(record && record.claimedAt || ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function canonicalClaimPeriod(record, card) {
+  const cycle = card && card.cycle || "daily";
+  if (cycle === "once") return "once";
+  const raw = String(record && record.periodKey || "");
+  if (cycle === "monthly") {
+    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+    if (isValidDateKey(raw)) return raw.slice(0, 7);
+    const timestamp = claimTimestamp(record);
+    return timestamp ? dateKey(new Date(timestamp)).slice(0, 7) : "";
+  }
+  if (isValidDateKey(raw)) return raw;
+  const timestamp = claimTimestamp(record);
+  return timestamp ? dateKey(new Date(timestamp)) : "";
+}
+
+function migrateLegacyComputeClaims(legacyMap, cards) {
+  const byId = new Map((Array.isArray(cards) ? cards : []).map(card => [String(card.id), card]));
+  const records = [];
+  const seen = new Set();
+  for (const [day, ids] of Object.entries(legacyMap && typeof legacyMap === "object" ? legacyMap : {})) {
+    if (!isValidDateKey(day) || !Array.isArray(ids)) continue;
+    for (const rawCardId of ids) {
+      const cardId = String(rawCardId || "");
+      const card = byId.get(cardId);
+      // 已删除卡片的旧 ID 是孤儿记录：跳过迁移，不删除旧 computeCheckins。
+      if (!card) continue;
+      const cycle = card.cycle || "daily";
+      const periodKey = cycle === "once" ? "once" : cycle === "monthly" ? day.slice(0, 7) : day;
+      const uniqueKey = `${cardId}::${periodKey}`;
+      if (seen.has(uniqueKey)) continue;
+      seen.add(uniqueKey);
+      const parsed = Date.parse(`${day}T12:00:00`);
+      records.push(normalizeClaimRecord({
+        id: `legacy-${day}-${cardId}`,
+        cardId,
+        periodKey,
+        claimedAt: Number.isFinite(parsed) ? parsed : 0,
+        amountSnapshot: Number(card.amount) || 0,
+        valueSnapshot: card.value || "",
+        currency: card.currency || "CNY",
+        source: "legacy-migration"
+      }, records.length));
+    }
+  }
+  return records;
+}
+
+// 合并新旧领取记录。旧映射始终保留；现有记录优先，旧映射只补缺失周期。
+// 孤儿记录原样保留在数组中，但不参与周期去重和统计。
+function mergeComputeClaimRecords(existingRecords, legacyMap, cards, rawExistingRecords) {
+  const byId = new Map((Array.isArray(cards) ? cards : []).map(card => [String(card.id), card]));
+  const result = [];
+  const seen = new Map();
+  const rawList = Array.isArray(rawExistingRecords) ? rawExistingRecords : [];
+  const input = Array.isArray(existingRecords) ? existingRecords : [];
+
+  const mergeMissingFields = (target, source) => {
+    for (const [key, value] of Object.entries(source || {})) {
+      if (!hasOwnField(target, key) || target[key] === undefined) target[key] = value;
+    }
+  };
+
+  const addRecord = (rawRecord, index, rawSource, isLegacy = false) => {
+    const record = normalizeClaimRecord(rawRecord, index);
+    const card = byId.get(String(record.cardId || ""));
+    if (!card) {
+      result.push(record);
+      return;
+    }
+
+    // periodKey 缺失时仅从该记录自身的时间戳推导；已有空字符串等值不覆盖。
+    if (rawSource && (!hasOwnField(rawSource, "periodKey") || rawSource.periodKey === undefined)) {
+      const derived = canonicalClaimPeriod(record, card);
+      if (derived) record.periodKey = derived;
+    }
+    if (isLegacy && !hasOwnField(rawRecord, "source")) record.source = "legacy-migration";
+
+    const period = canonicalClaimPeriod(record, card);
+    if (!period) {
+      result.push(record);
+      return;
+    }
+    const uniqueKey = `${card.id}::${period}`;
+    if (seen.has(uniqueKey)) {
+      mergeMissingFields(result[seen.get(uniqueKey)], record);
+      return;
+    }
+    seen.set(uniqueKey, result.length);
+    result.push(record);
+  };
+
+  input.forEach((record, index) => addRecord(record, index, rawList[index] || record, false));
+  const legacyRecords = migrateLegacyComputeClaims(legacyMap, cards);
+  legacyRecords.forEach((record, index) => addRecord(record, input.length + index, record, true));
+
+  // 去重合并后才回填快照：若重复记录中已有历史快照，优先保留它而不是用当前卡片估值覆盖。
+  for (const record of result) {
+    const card = byId.get(String(record.cardId || ""));
+    if (!card) continue; // 孤儿记录不补字段、不计入统计。
+    if (!hasOwnField(record, "amountSnapshot") || record.amountSnapshot === undefined) {
+      record.amountSnapshot = Number(card.amount) || 0;
+    }
+    if (!hasOwnField(record, "valueSnapshot") || record.valueSnapshot === undefined) {
+      record.valueSnapshot = String(card.value || "");
+    }
+    if (!hasOwnField(record, "currency") || record.currency === undefined) {
+      record.currency = String(card.currency || "CNY");
+    }
+    if (!hasOwnField(record, "periodKey") || record.periodKey === undefined) {
+      const derived = canonicalClaimPeriod(record, card);
+      if (derived) record.periodKey = derived;
+    }
+  }
+  return result;
+}
+
+function isAppBundleInstalled(app) {
+  const appPath = String(app?.path || "");
+  if (!appPath || !fs.existsSync(appPath)) return false;
+  return fs.existsSync(path.join(appPath, "Contents", "Info.plist"));
+}
+
+function isComputeCardInValidity(card, todayKey = dateKey(new Date())) {
+  if (!card || card.enabled === false) return false;
+  if (card.validFrom && todayKey < card.validFrom) return false;
+  if (card.validUntil && todayKey > card.validUntil) return false;
+  return true;
+}
+
 const VIEW_TYPE = "mac-app-launcher-view";
-const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）时代
+const SCHEMA_VERSION = 4; // 配置结构版本：4 = 安全迁移、应用关联回填与周期领取记录合并
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.30.0", changes: ["首页重构：顶部仅显示最多 8 个常用应用，算力福利卡册成为首页主体", "首页搜索同时匹配应用与福利卡片", "移除应用笔记、关联知识、反向链接与应用资料 Bases 入口；不删除既有笔记文件及 notePath 历史字段", "不新增或删除持久化字段，保留旧首页布局配置与全部领取记录", "打开客户端/网页仍不自动打卡，领取必须人工确认"] },
+  { version: "1.29.0", changes: ["安全迁移：备份失败时中止，不推进 schemaVersion；保留未知设置与全部历史字段", "应用资源回填：仅对原始数据缺少 bundleId 的本地应用读取 Info.plist；appMatch 唯一匹配时回填稳定 appId", "领取记录合并：合并 computeClaimRecords 与旧 computeCheckins，按 once / monthly / daily 周期去重并回填缺失快照", "孤儿领取记录保留在原始数据中但不计入统计；删除自定义应用时保留福利卡片原 appId", "系统应用路径含 /System/ 时不提供应用官网入口，网页应用统计与公开 API 排除系统应用", "应用重扫优先保留用户已有 bundleId、websiteUrl、pinnedOrder、hotkey、notePath、launchMode、category 等资料"] },
+  { version: "1.28.0", changes: ["统一应用资源：应用资料新增官方网站入口并支持纯网页应用，首页启动与福利卡册共享同一应用记录", "Smart 启动：优先打开本地客户端，客户端缺失或启动失败时回退到网页；支持主动切换网页", "领取记录升级为独立周期记录，保存领取时估值快照，修改卡片估值不再改写历史累计价值", "福利卡片增加有效期与启停状态；统计只计入当前有效且可领取的福利", "修复旧版 computeSchema 不匹配时可能重置自定义卡片的问题；迁移旧领取记录并保留历史", "应用重扫时尽量保留原应用 ID，减少福利关联、场景和文件规则失效"] },
   { version: "1.27.1", changes: ["修复：打开客户端或网页不再自动记为已领取，必须由用户手动确认", "卡片列表增加「标记已收」独立操作，详情页打开入口后保留确认按钮", "福利卡片支持关联稳定应用 ID；旧版关键词仅在唯一匹配时迁移，避免误启动相似应用", "外部链接仅允许 http/https，校验福利链接并拒绝不安全协议", "优化卡册福利列表的响应式网格布局"] },
   { version: "1.27.0", changes: ["算力卡册增加客户端 / 网页双向启动入口，客户端优先并可手动切换", "算力卡册活跃月历迁移到卡册页顶部，首页保留三栏工作区"] },
   { version: "1.26.0", changes: ["首页改为桌面启动器风格：大时钟、日期农历一行、居中搜索框，仪表盘与分类去卡片底", "应用磁贴支持 1×1 / 2×1 / 1×2 / 2×2 四种布局，右键「布局」切换，图标等比放大", "图标右键菜单：编辑 / 更换自定义图标、恢复默认图标、编辑应用主页", "首页各模块（含分类）可自由拖拽换位、拖拽调整宽高，模块高度自适应内容并持久化", "移除「最近启动」模块与卡片右上角置顶星标，分类导航去掉「全部」并整体居中", "细节打磨：分类标题竖条与分隔线、芯片条柔和选中态、悬停浮起与图标投影"] },
@@ -181,9 +402,6 @@ const DEFAULT_COMPUTE_CARDS = [
   { id: "tencent-adp", group: "每月福利", cycle: "monthly", name: "腾讯云 ADP · 体验版", value: "每月 15,000 PU", amount: 10, emoji: "☁️", color: "#60a5fa", desc: "智能体、知识库与工作流，按平台用量发放。", url: "https://cloud.tencent.com/product/adp" },
   { id: "elevenlabs-monthly", group: "每月福利", cycle: "monthly", name: "ElevenLabs · 免费语音额度", value: "每月 10,000 Credits", amount: 10, emoji: "🎙️", color: "#a78bfa", desc: "配音、语音转写与音效，按订阅周期发放。", url: "https://elevenlabs.io/app/" }
 ];
-
-// 应用资料卡笔记的存放目录
-const APP_NOTES_FOLDER = "应用资料";
 
 // 文件右键菜单：扩展名 → 推荐应用分类
 const EXT_CATEGORY_RULES = [
@@ -637,15 +855,15 @@ class ComputeCardModal extends Modal {
     const nameInput = field("名称", "例如 GLM-5.3-Flash · 1 亿 Token", c.name);
     const valueInput = field("面值文案", "例如 1 亿 Token / 每月 500 积分", c.value);
     const amountInput = field("估值（元，仅用于统计）", "例如 300", c.amount === undefined ? "" : String(c.amount));
-    const urlInput = field("领取网页（可选）", "https://…", c.url);
-    contentEl.createDiv({ cls: "mal-mood-label", text: "关联本地应用（可选）" });
+    const urlInput = field("专属领取网页（可选）", "https://…（留空时使用关联应用的官方网站）", c.url);
+    contentEl.createDiv({ cls: "mal-mood-label", text: "关联统一应用资源（可选）" });
     const appSelect = contentEl.createEl("select", { cls: "dropdown" });
     appSelect.createEl("option", { text: "不关联本地应用（仅使用网页）", value: "" });
     const localApps = Array.isArray(this.plugin.settings.apps) ? [...this.plugin.settings.apps] : [];
     localApps.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
     for (const app of localApps) {
       appSelect.createEl("option", {
-        text: `${app.name}${app.path ? ` · ${path.basename(app.path)}` : ""}`,
+        text: `${app.name} · ${isAppBundleInstalled(app) ? "客户端已安装" : app.websiteUrl ? "网页入口可用" : "客户端不可用"}`,
         value: String(app.id || "")
       });
     }
@@ -662,10 +880,26 @@ class ComputeCardModal extends Modal {
       text: staleAppId
         ? "当前扫描结果中没有原关联应用。可重新扫描或选择其他应用；如暂不调整，旧关联 ID 会保留，启动时不会猜测其他客户端。"
         : localApps.length
-          ? "关联后，首页应用管理与算力卡册共用同一份本地应用资料。默认优先打开客户端，也可切换到本卡片的领取网页。"
-          : "当前还没有可关联的本地应用。请先扫描或添加应用；旧版关键词关联仍会保留兼容。"
+          ? "关联后，首页应用管理与算力卡册共用同一份应用资料。客户端可用时优先启动客户端，否则打开应用官网；本卡片专属领取网页优先。"
+          : "当前还没有可关联的应用资源。请先扫描本机应用或添加网页应用；旧版关键词关联仍会保留兼容。"
     });
     const groupInput = field("分组", "例如 新人礼包 / 服务器 GPU / 每日福利 / 每月福利", c.group || "自定义");
+    const dateField = (label, value) => {
+      contentEl.createDiv({ cls: "mal-mood-label", text: label });
+      const input = contentEl.createEl("input", { cls: "mal-mood-input", attr: { type: "date" } });
+      input.value = value || "";
+      return input;
+    };
+    const validFromInput = dateField("生效日期（可选）", c.validFrom);
+    const validUntilInput = dateField("截止日期（可选）", c.validUntil);
+    const enabledRow = contentEl.createDiv({ cls: "mal-compute-enabled-row" });
+    const enabledInput = enabledRow.createEl("input", { attr: { type: "checkbox" } });
+    enabledInput.checked = c.enabled !== false;
+    enabledRow.createEl("span", { text: "启用此福利卡片" });
+    contentEl.createEl("p", {
+      cls: "mal-muted",
+      text: "有效期之外或已停用的卡片仍保留在卡册中，但不会计入当前可领取价值。"
+    });
     contentEl.createDiv({ cls: "mal-mood-label", text: "说明（可选）" });
     const descInput = contentEl.createEl("textarea", { cls: "mal-mood-input mal-compute-desc", attr: { rows: "2", placeholder: "一句话说明这个福利怎么用" } });
     descInput.value = c.desc || "";
@@ -713,6 +947,10 @@ class ComputeCardModal extends Modal {
         new Notice("领取网页必须是有效的 http:// 或 https:// 地址");
         return;
       }
+      if (validFromInput.value && validUntilInput.value && validFromInput.value > validUntilInput.value) {
+        new Notice("生效日期不能晚于截止日期");
+        return;
+      }
       const next = {
         id: c.id || `c${Date.now().toString(36)}`,
         name,
@@ -726,7 +964,11 @@ class ComputeCardModal extends Modal {
         appMatch: appSelect.value ? "" : String(c.appMatch || ""),
         desc: descInput.value.trim(),
         emoji: emojiInput.value.trim() || "⚡",
-        color
+        color,
+        validFrom: validFromInput.value || "",
+        validUntil: validUntilInput.value || "",
+        enabled: enabledInput.checked,
+        currency: c.currency || "CNY"
       };
       const list = Array.isArray(this.plugin.settings.computeCards) ? this.plugin.settings.computeCards : [];
       const idx = list.findIndex(x => x.id === next.id);
@@ -748,6 +990,128 @@ class ComputeCardModal extends Modal {
 
 // 自定义入口的编辑弹窗：标题 / 副标题 / 图标 / 链接
 class CustomEntryModal extends Modal {
+  constructor(app, plugin, group, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.group = group === "left" ? "left" : "right";
+    this.onDone = onDone;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    const isLeft = this.group === "left";
+    contentEl.createEl("h3", { text: isLeft ? "左栏快捷入口" : "右栏快捷入口" });
+    contentEl.createEl("p", {
+      cls: "mal-muted",
+      text: "2×2 快捷入口，点它会打开对应网址。最多 4 个。"
+    });
+    const key = isLeft ? "leftEntries" : "customEntries";
+    const entries = (this.plugin.settings[key] || []).map(e => ({ ...e }));
+
+    const listEl = contentEl.createDiv({ cls: "mal-entry-edit-list" });
+
+    const renderList = () => {
+      listEl.empty();
+      entries.forEach((entry, index) => {
+        const row = listEl.createDiv({ cls: "mal-entry-edit-row" });
+        const label = row.createDiv({ cls: "mal-entry-edit-label" });
+        if (entry.iconImage) {
+          label.createEl("img", { cls: "mal-entry-thumb", attr: { src: entry.iconImage } });
+        } else {
+          label.createSpan({ text: entry.emoji || "🔗", cls: "mal-entry-label-emoji" });
+        }
+        label.createSpan({ text: entry.title || "未命名链接" });
+        if (entry.url) label.createSpan({ cls: "mal-muted", text: entry.url });
+        const edit = row.createEl("button", { text: "编辑" });
+        edit.addEventListener("click", () => openForm(entry));
+        const del = row.createEl("button", { text: "删除", cls: "mal-danger-text" });
+        del.addEventListener("click", () => {
+          entries.splice(index, 1);
+          renderList();
+        });
+      });
+    };
+
+    const openForm = (entry) => {
+      listEl.empty();
+      const wrap = listEl.createDiv({ cls: "mal-entry-form" });
+
+      new Setting(wrap).setName("名称").addText(text => text
+        .setPlaceholder("名称").setValue(entry.title).onChange(v => { entry.title = v; }));
+      new Setting(wrap).setName("网址链接").addText(text => text
+        .setPlaceholder("https://").setValue(entry.url).onChange(v => { entry.url = v.trim(); }));
+
+      // 文字图标
+      new Setting(wrap).setName("文字图标").setDesc("一个 emoji，如 🔥").addText(text => text
+        .setPlaceholder("🔥").setValue(entry.emoji || "").onChange(v => { entry.emoji = v; }));
+
+      // 图标颜色（对文字图标生效）
+      const colorSetting = new Setting(wrap).setName("图标颜色").setDesc("仅对文字图标生效，留空用主题默认色");
+      colorSetting.addColorPicker(picker => {
+        picker.setValue(entry.iconColor || "#0284c7").onChange(v => { entry.iconColor = v; });
+      });
+
+      // 上传图标（可选，替代文字图标）
+      const uploadSetting = new Setting(wrap).setName("上传图标").setDesc("可选，选图后覆盖文字图标显示");
+      const fileInput = uploadSetting.controlEl.createEl("input", {
+        type: "file", attr: { accept: "image/*" }
+      });
+      fileInput.style.display = "none";
+      uploadSetting.addButton(btn => btn.setButtonText("选择图片").onClick(() => fileInput.click()));
+      if (entry.iconImage) {
+        uploadSetting.addButton(btn => btn.setButtonText("移除图片").onClick(() => {
+          entry.iconImage = "";
+          openForm(entry);
+        }));
+        const prev = wrap.createDiv({ cls: "mal-entry-preview" });
+        prev.createEl("img", { attr: { src: entry.iconImage } });
+      }
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          entry.iconImage = String(reader.result);
+          openForm(entry);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const back = wrap.createEl("button", { text: "返回列表", cls: "mal-entry-back" });
+      back.addEventListener("click", () => renderList());
+    };
+
+    renderList();
+
+    const actions = contentEl.createDiv({ cls: "mal-mood-actions" });
+    const addBtn = actions.createEl("button", { text: "+ 添加链接" });
+    addBtn.addEventListener("click", () => {
+      if (entries.length >= 4) {
+        new Notice("每组最多 4 个快捷入口");
+        return;
+      }
+      const entry = { title: "", sub: "", emoji: "", iconColor: "", iconImage: "", url: "" };
+      entries.push(entry);
+      openForm(entry);
+    });
+    const save = actions.createEl("button", { cls: "mod-cta", text: "完成" });
+    save.addEventListener("click", async () => {
+      this.plugin.settings[key] = entries.filter(e => e.title || e.url).slice(0, 4);
+      await this.plugin.saveSettings();
+      this.close();
+      this.onDone();
+    });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// 广告位编辑弹窗：两行一列，每个只填图片 + 网址链接
+class AdSlotModal extends Modal {
   constructor(app, plugin, onDone) {
     super(app);
     this.plugin = plugin;
@@ -756,45 +1120,86 @@ class CustomEntryModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "自定义入口" });
-    contentEl.createEl("p", {
-      cls: "mal-muted",
-      text: "显示在首页工作区的入口卡，点它会打开这里的链接。"
-    });
-    const entry = Object.assign({ title: "", sub: "", emoji: "", url: "" }, this.plugin.settings.customEntry || {});
+    contentEl.createEl("h3", { text: "右侧广告位" });
+    contentEl.createEl("p", { cls: "mal-muted", text: "两行一列，每个广告只需一张图片 + 一个网址链接。" });
+    const ads = (this.plugin.settings.adSlots || []).slice(0, 2).map(a => ({ ...a }));
 
-    new Setting(contentEl)
-      .setName("标题")
-      .addText(text => text
-        .setPlaceholder("更多白嫖快看【AI信息差】")
-        .setValue(entry.title)
-        .onChange(value => { entry.title = value; }));
-    new Setting(contentEl)
-      .setName("副标题")
-      .setDesc("可留空，一行小字")
-      .addText(text => text
-        .setPlaceholder("一句话说明")
-        .setValue(entry.sub)
-        .onChange(value => { entry.sub = value; }));
-    new Setting(contentEl)
-      .setName("图标")
-      .setDesc("一个 emoji，可留空")
-      .addText(text => text
-        .setPlaceholder("🔥")
-        .setValue(entry.emoji)
-        .onChange(value => { entry.emoji = value; }));
-    new Setting(contentEl)
-      .setName("链接")
-      .setDesc("点击卡片时打开的网址")
-      .addText(text => text
-        .setPlaceholder("https://")
-        .setValue(entry.url)
-        .onChange(value => { entry.url = value.trim(); }));
+    const listEl = contentEl.createDiv({ cls: "mal-entry-edit-list" });
+
+    const renderList = () => {
+      listEl.empty();
+      ads.forEach((ad, index) => {
+        const row = listEl.createDiv({ cls: "mal-entry-edit-row" });
+        const label = row.createDiv({ cls: "mal-entry-edit-label" });
+        if (ad.image) {
+          label.createEl("img", { cls: "mal-entry-thumb", attr: { src: ad.image } });
+        } else {
+          label.createSpan({ text: "🖼", cls: "mal-entry-label-emoji" });
+        }
+        label.createSpan({ text: ad.url || "未设置链接" });
+        const edit = row.createEl("button", { text: "编辑" });
+        edit.addEventListener("click", () => openForm(ad));
+        const del = row.createEl("button", { text: "删除", cls: "mal-danger-text" });
+        del.addEventListener("click", () => {
+          ads.splice(index, 1);
+          renderList();
+        });
+      });
+    };
+
+    const openForm = (ad) => {
+      listEl.empty();
+      const wrap = listEl.createDiv({ cls: "mal-entry-form" });
+
+      new Setting(wrap).setName("网址链接").addText(text => text
+        .setPlaceholder("https://").setValue(ad.url).onChange(v => { ad.url = v.trim(); }));
+
+      new Setting(wrap).setName("图片链接").setDesc("填 http(s) 图片地址，或用下方按钮上传本地图片").addText(text => text
+        .setPlaceholder("https://example.com/ad.png").setValue(ad.image && ad.image.startsWith("http") ? ad.image : "").onChange(v => { ad.image = v.trim(); }));
+
+      const uploadSetting = new Setting(wrap).setName("上传图片").setDesc("本地图片会转成 base64 存入配置");
+      const fileInput = uploadSetting.controlEl.createEl("input", { type: "file", attr: { accept: "image/*" } });
+      fileInput.style.display = "none";
+      uploadSetting.addButton(btn => btn.setButtonText("选择图片").onClick(() => fileInput.click()));
+      if (ad.image) {
+        uploadSetting.addButton(btn => btn.setButtonText("移除图片").onClick(() => {
+          ad.image = "";
+          openForm(ad);
+        }));
+        const prev = wrap.createDiv({ cls: "mal-entry-preview" });
+        prev.createEl("img", { attr: { src: ad.image } });
+      }
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          ad.image = String(reader.result);
+          openForm(ad);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const back = wrap.createEl("button", { text: "返回列表", cls: "mal-entry-back" });
+      back.addEventListener("click", () => renderList());
+    };
+
+    renderList();
 
     const actions = contentEl.createDiv({ cls: "mal-mood-actions" });
-    const save = actions.createEl("button", { cls: "mod-cta", text: "保存" });
+    const addBtn = actions.createEl("button", { text: "+ 添加广告" });
+    addBtn.addEventListener("click", () => {
+      if (ads.length >= 2) {
+        new Notice("最多 2 个广告位");
+        return;
+      }
+      const ad = { image: "", url: "" };
+      ads.push(ad);
+      openForm(ad);
+    });
+    const save = actions.createEl("button", { cls: "mod-cta", text: "完成" });
     save.addEventListener("click", async () => {
-      this.plugin.settings.customEntry = entry;
+      this.plugin.settings.adSlots = ads.filter(a => a.image || a.url).slice(0, 2);
       await this.plugin.saveSettings();
       this.close();
       this.onDone();
@@ -958,7 +1363,7 @@ class FileRulesModal extends Modal {
       cls: "mal-add-custom-hint"
     });
     const rules = this.plugin.settings.fileRules;
-    const apps = this.plugin.settings.apps.filter(a => a.selected !== false);
+    const apps = this.plugin.settings.apps.filter(a => a.selected !== false && a.path);
     const list = contentEl.createDiv({ cls: "mal-steps-list" });
     rules.forEach((rule, index) => {
       const row = list.createDiv({ cls: "mal-step-row" });
@@ -1264,6 +1669,10 @@ function normalizeApp(app, index) {
     usage: typeof app.usage === "string" ? app.usage : suggested.usage,
     iconPath: app.iconPath || "",
     iconSource: app.iconSource || "",
+    bundleId: typeof app.bundleId === "string" ? app.bundleId : "",
+    websiteUrl: typeof app.websiteUrl === "string" ? app.websiteUrl : "",
+    webOnly: !!app.webOnly,
+    launchMode: app.launchMode === "web" ? "web" : "smart",
     tileW: app.tileW === 2 ? 2 : 1,
     tileH: app.tileH === 2 ? 2 : 1,
     customIcon: !!app.customIcon
@@ -1356,7 +1765,7 @@ class MacAppLauncherView extends ItemView {
         cls: "mal-subtitle"
       });
     } else if (this.mode === "album") {
-      titleWrap.createEl("h2", { text: "算力打卡卡册", cls: "mal-title" });
+      titleWrap.createEl("h2", { text: "AI 算力卡册", cls: "mal-title" });
       titleWrap.createEl("div", {
         text: "打开客户端或网页完成领取，返回后手动标记；右键可编辑或删除",
         cls: "mal-subtitle"
@@ -1423,34 +1832,9 @@ class MacAppLauncherView extends ItemView {
     this.renderBody(body);
   }
 
-  // 右上角设置图标：点开二级菜单，集中视图切换、布局开关、扫描、管理与重载
+  // 首页设置菜单：保留应用管理、扫描和重载；卡册已成为首页主体。
   openHomeMenu(event) {
     const menu = new Menu();
-    menu.addItem(item => item
-      .setTitle(this.plugin.settings.viewMode === "list" ? "切换为网格视图" : "切换为列表视图")
-      .setIcon("layout-grid")
-      .onClick(async () => {
-        this.plugin.settings.viewMode = this.plugin.settings.viewMode === "list" ? "grid" : "list";
-        await this.plugin.saveSettings();
-        this.render();
-      }));
-    menu.addItem(item => item
-      .setTitle(this.plugin.settings.homeFreeLayout === false ? "开启自由布局" : "关闭自由布局")
-      .setIcon("move")
-      .onClick(async () => {
-        this.plugin.settings.homeFreeLayout = this.plugin.settings.homeFreeLayout === false;
-        await this.plugin.saveSettings();
-        this.render();
-      }));
-    menu.addSeparator();
-    menu.addItem(item => item
-      .setTitle("算力打卡卡册")
-      .setIcon("zap")
-      .onClick(() => {
-        this.mode = "album";
-        this.searchTerm = "";
-        this.render();
-      }));
     menu.addItem(item => item
       .setTitle("管理应用")
       .setIcon("sliders-horizontal")
@@ -1537,7 +1921,7 @@ class MacAppLauncherView extends ItemView {
     const box = hero.createDiv({ cls: "mal-hero-search" });
     box.createSpan({ cls: "mal-hero-search-icon", text: "⌕" });
     const input = box.createEl("input", {
-      attr: { type: "search", placeholder: "搜索已选应用…" },
+      attr: { type: "search", placeholder: "搜索应用或福利卡片…" },
       cls: "mal-hero-input"
     });
     input.value = this.searchTerm;
@@ -1563,7 +1947,7 @@ class MacAppLauncherView extends ItemView {
   // 键盘导航：在当前首页结果里移动高亮
   kbCards() {
     if (!this.bodyEl) return [];
-    return Array.from(this.bodyEl.querySelectorAll(".mal-app-card"));
+    return Array.from(this.bodyEl.querySelectorAll(".mal-home-quick-app"));
   }
 
   moveKbSelection(step) {
@@ -1600,17 +1984,20 @@ class MacAppLauncherView extends ItemView {
     body.empty();
     const term = this.searchTerm.trim().toLocaleLowerCase();
     if (this.mode === "manage") this.renderManager(body, term);
-    else if (this.mode === "album") this.renderAlbum(body);
+    else if (this.mode === "album") this.renderAlbum(body, term);
     else this.renderHome(body, term);
   }
 
-  // 首页工作区：三块按 workspaceOrder 排列（album 算力 1/5 / apps 常用应用 / entry 自定义入口 1/5），可拖拽换位
+  // 首页工作区：卡册入口 + 常用应用 + 自定义入口卡，三块等宽，可拖拽换位
   renderDashboard(body, selected = []) {
     const row = body.createDiv({ cls: "mal-workspace" });
-    const order = this.plugin.settings.workspaceOrder || ["album", "apps", "entry"];
-    const colClass = { album: "mal-ws-left", apps: "mal-ws-mid", entry: "mal-ws-entry" };
-    // 列宽跟随模块本身：算力 1fr、常用应用 3fr、入口 1fr，换位后宽度不变
-    const sizeClass = { album: "1fr", apps: "3fr", entry: "1fr" };
+    // 三块一排：左快捷入口（2×2）/ 常用应用 / 右广告位（两行一列）
+    const available = ["left", "apps", "entry"];
+    const stored = (this.plugin.settings.workspaceOrder || []).filter(key => available.includes(key));
+    const order = stored.length ? [...stored] : [...available];
+    for (const key of available) if (!order.includes(key)) order.push(key);
+    const colClass = { left: "mal-ws-left", apps: "mal-ws-mid", entry: "mal-ws-entry" };
+    const sizeClass = { left: "1fr", apps: "2fr", entry: "1fr" };
     row.style.gridTemplateColumns = order.map(key => sizeClass[key] || "1fr").join(" ");
 
     for (const key of order) {
@@ -1618,9 +2005,9 @@ class MacAppLauncherView extends ItemView {
       col.dataset.ws = key;
       this.attachWorkspaceDrag(col, key);
 
-      if (key === "album") this.renderAlbumEntry(col);
-      else if (key === "apps") this.renderQuickApps(col, selected);
-      else this.renderCustomEntry(col);
+      if (key === "apps") this.renderQuickApps(col, selected);
+      else if (key === "left") this.renderCustomEntry(col, "left");
+      else this.renderAdSlots(col);
     }
   }
 
@@ -1660,70 +2047,146 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
-  // 自定义入口：单个入口卡，浅色玻璃底，与其他两块风格一致
-  renderCustomEntry(col) {
-    const entry = this.plugin.settings.customEntry || {};
-    const box = col.createDiv({ cls: "mal-entry-single" });
-    if (entry.emoji) box.createDiv({ cls: "mal-entry-icon", text: entry.emoji });
-    box.createDiv({ cls: "mal-entry-title", text: entry.title || "自定义入口" });
-    const sub = entry.sub || (entry.title ? "" : "点此编辑标题与链接");
-    if (sub) box.createDiv({ cls: "mal-entry-sub", text: sub });
-    box.setAttribute("title", entry.url ? `${entry.title} · ${entry.url}` : "点击编辑自定义入口");
-    box.addEventListener("click", () => {
-      if (entry.url) openExternalUrl(entry.url);
-      else this.openCustomEntryEditor();
-    });
-    box.addEventListener("contextmenu", event => {
-      event.preventDefault();
-      this.openCustomEntryEditor();
-    });
+  // 快捷入口：2×2 网格，每格一条链接，空格显示 +，点开对应网址
+  renderCustomEntry(col, group = "right") {
+    const entries = (group === "left"
+      ? (this.plugin.settings.leftEntries || [])
+      : (this.plugin.settings.customEntries || [])).slice(0, 4);
+    const grid = col.createDiv({ cls: "mal-entry-grid" });
+    for (let i = 0; i < 4; i++) {
+      const entry = entries[i];
+      if (entry) {
+        const box = grid.createDiv({ cls: "mal-entry-single" });
+        // 前台只展示图标 + 名字
+        if (entry.iconImage) {
+          box.createEl("img", { cls: "mal-entry-img", attr: { src: entry.iconImage } });
+        } else if (entry.emoji) {
+          const icon = box.createDiv({ cls: "mal-entry-icon", text: entry.emoji });
+          if (entry.iconColor) icon.style.color = entry.iconColor;
+        }
+        box.createDiv({ cls: "mal-entry-title", text: entry.title || "快捷入口" });
+        box.setAttribute("title", entry.url ? `${entry.title} · ${entry.url}` : "点击编辑快捷入口");
+        box.addEventListener("click", () => {
+          if (entry.url) openExternalUrl(entry.url);
+          else this.openCustomEntryEditor(group);
+        });
+        box.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          this.openCustomEntryEditor(group);
+        });
+      } else {
+        const slot = grid.createDiv({ cls: "mal-entry-single mal-entry-slot" });
+        slot.createDiv({ cls: "mal-entry-plus", text: "+" });
+        slot.setAttribute("title", "添加快捷入口");
+        slot.addEventListener("click", () => this.openCustomEntryEditor(group));
+      }
+    }
   }
 
-  openCustomEntryEditor() {
-    new CustomEntryModal(this.app, this.plugin, () => this.render()).open();
+  openCustomEntryEditor(group = "right") {
+    new CustomEntryModal(this.app, this.plugin, group, () => this.render()).open();
   }
 
-  // 中间栏：按使用频次取常用应用，紧凑图标网格
-  renderQuickApps(col, selected) {
-    const apps = [...selected];
-    // 置顶应用按 pinnedOrder 排（未记录的续在末尾），其余按使用频次补足
+  // 右侧广告位：两行一列，每个只含图片 + 网址链接
+  renderAdSlots(col) {
+    const ads = (this.plugin.settings.adSlots || []).slice(0, 2);
+    const list = col.createDiv({ cls: "mal-ad-list" });
+    for (let i = 0; i < 2; i++) {
+      const ad = ads[i];
+      if (ad && (ad.image || ad.url)) {
+        const slot = list.createDiv({ cls: "mal-ad-slot" });
+        if (ad.image) slot.createEl("img", { cls: "mal-ad-img", attr: { src: ad.image } });
+        slot.setAttribute("title", ad.url ? ad.url : "点击编辑广告位");
+        slot.addEventListener("click", () => {
+          if (ad.url) openExternalUrl(ad.url);
+          else this.openAdEditor();
+        });
+        slot.addEventListener("contextmenu", event => {
+          event.preventDefault();
+          this.openAdEditor();
+        });
+      } else {
+        const slot = list.createDiv({ cls: "mal-ad-slot mal-ad-empty" });
+        slot.createDiv({ cls: "mal-entry-plus", text: "+" });
+        slot.setAttribute("title", "添加广告");
+        slot.addEventListener("click", () => this.openAdEditor());
+      }
+    }
+  }
+
+  openAdEditor() {
+    new AdSlotModal(this.app, this.plugin, () => this.render()).open();
+  }
+
+  // 首页顶部常用应用：只展示置顶与高频应用，不再在卡册下方铺开全部软件。
+  renderQuickApps(container, selected, term = "") {
+    const apps = [...(selected || [])];
+    const query = String(term || "").trim().toLocaleLowerCase();
+    const candidates = query ? apps.filter(app =>
+      `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(query)
+    ) : apps;
     const pinOrder = this.plugin.settings.pinnedOrder || [];
     const pinRank = id => {
       const i = pinOrder.indexOf(id);
       return i < 0 ? 9999 : i;
     };
-    const pinnedList = apps.filter(a => a.pinned).sort((a, b) => pinRank(a.id) - pinRank(b.id));
-    const used = apps.filter(a => (a.launchCount || 0) > 0)
+    const pinnedList = candidates.filter(a => a.pinned).sort((a, b) => pinRank(a.id) - pinRank(b.id));
+    const used = candidates.filter(a => (a.launchCount || 0) > 0)
       .sort((a, b) => (b.launchCount || 0) - (a.launchCount || 0) || (b.lastLaunchedAt || 0) - (a.lastLaunchedAt || 0));
-    // 置顶的排前面，其余按使用频次补足
     const seenIds = new Set(pinnedList.map(a => a.id));
     const merged = pinnedList.concat(used.filter(a => !seenIds.has(a.id)));
-    const list = merged.length ? merged : apps;
-    const picked = list.slice(0, 24);
+    const list = (merged.length ? merged : candidates).slice(0, 16);
 
-    const head = col.createDiv({ cls: "mal-ws-head" });
-    head.createDiv({ cls: "mal-ws-title", text: "常用应用" });
-    head.createDiv({ cls: "mal-ws-sub", text: picked.length ? `${picked.length} 个` : "" });
+    const section = container.createDiv({ cls: "mal-home-apps" });
+    const head = section.createDiv({ cls: "mal-home-apps-head" });
+    const title = head.createDiv({ cls: "mal-home-apps-title" });
+    title.createSpan({ text: "常用应用" });
+    title.createSpan({ cls: "mal-home-apps-count", text: query ? `匹配 ${list.length} 个` : `${list.length} / ${apps.length}` });
+    const manage = head.createEl("button", { text: "管理应用", cls: "mal-home-apps-manage" });
+    manage.addEventListener("click", () => {
+      this.mode = "manage";
+      this.searchTerm = "";
+      this.render();
+    });
 
-    const grid = col.createDiv({ cls: "mal-quick-grid" });
-    if (!picked.length) {
-      grid.createEl("p", { cls: "mal-muted", text: "还没有应用" });
+    const grid = section.createDiv({ cls: "mal-quick-grid mal-home-apps-grid" });
+    // 固定每行 8 个图标，超过 8 个自动换成第二行
+    grid.style.gridTemplateColumns = "repeat(8, minmax(0, 1fr))";
+    if (!list.length) {
+      const empty = grid.createDiv({ cls: "mal-home-apps-empty" });
+      empty.createSpan({ text: query ? "没有匹配的常用应用" : "还没有常用应用" });
+      const action = empty.createEl("button", {
+        text: apps.length ? "选择常用应用" : (this.plugin.settings.hasScanned ? "管理应用" : "扫描本机应用"),
+        cls: "mal-home-apps-manage"
+      });
+      action.addEventListener("click", () => {
+        if (!apps.length && !this.plugin.settings.hasScanned) this.plugin.scanInstalledApps();
+        else { this.mode = "manage"; this.render(); }
+      });
       return;
     }
-    for (const app of picked) {
-      const el = grid.createDiv({ cls: "mal-quick-app" });
+
+    for (const app of list) {
+      const el = grid.createDiv({
+        cls: `mal-quick-app mal-home-quick-app${app.pinned ? " is-pinned" : ""}`,
+        attr: { tabindex: "0", role: "button", "aria-label": `启动 ${app.name}`, title: `${app.name} · 已启动 ${app.launchCount || 0} 次` }
+      });
+      el.dataset.appId = app.id;
       const icon = el.createDiv({ cls: "mal-quick-icon" });
       this.observeIcon(icon, app);
       el.createDiv({ cls: "mal-quick-name", text: app.name });
-      el.setAttribute("title", `${app.name} · 已启动 ${app.launchCount || 0} 次`);
       el.addEventListener("click", () => this.plugin.launchApp(app));
+      el.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          this.plugin.launchApp(app);
+        }
+      });
       el.addEventListener("contextmenu", event => {
         event.preventDefault();
         this.openAppMenu(app, event);
       });
-      // 置顶应用可拖拽排序，顺序存进 settings.pinnedOrder
-      if (app.pinned) {
-        el.addClass("is-pinned");
+      if (app.pinned && !query) {
         el.setAttribute("draggable", "true");
         el.addEventListener("dragstart", event => {
           event.dataTransfer.setData("text/plain", app.id);
@@ -1753,48 +2216,58 @@ class MacAppLauncherView extends ItemView {
   // 打卡周期：once 只收一次 / daily 每天可收 / monthly 每月可收
   computeSummary() {
     const cards = Array.isArray(this.plugin.settings.computeCards) ? this.plugin.settings.computeCards : [];
-    const checkins = this.plugin.settings.computeCheckins || {};
+    const records = Array.isArray(this.plugin.settings.computeClaimRecords) ? this.plugin.settings.computeClaimRecords : [];
     const todayKey = dateKey(new Date());
     const monthKey = todayKey.slice(0, 7);
-    const cycleOf = card => card.cycle || "daily";
-    const byId = new Map(cards.map(c => [c.id, c]));
-
+    const byId = new Map(cards.map(card => [card.id, card]));
     const claimed = new Set();
-    let total = 0;
     let claimedValue = 0;
-    for (const [day, ids] of Object.entries(checkins)) {
-      if (!Array.isArray(ids)) continue;
-      for (const id of ids) {
-        const card = byId.get(id);
-        if (!card) continue;
-        total += 1;
-        claimedValue += Number(card.amount) || 0;
-        const cycle = cycleOf(card);
-        const inCycle = cycle === "once" || (cycle === "daily" && day === todayKey) || (cycle === "monthly" && day.startsWith(monthKey));
-        if (inCycle) claimed.add(id);
-      }
+
+    const validRecords = [];
+    for (const record of records) {
+      const card = byId.get(String(record.cardId || ""));
+      // 孤儿记录保留在 data.json 供人工恢复，但跳过统计和周期状态判断。
+      if (!card) continue;
+      validRecords.push(record);
+      claimedValue += Number(record.amountSnapshot) || 0;
+      const cycle = card.cycle || "daily";
+      const expectedPeriod = cycle === "once" ? "once" : cycle === "monthly" ? monthKey : todayKey;
+      if (canonicalClaimPeriod(record, card) === expectedPeriod) claimed.add(card.id);
     }
 
-    // 最近一次领取日期（用于取消打卡时定位到具体那一天）
+    const recordsFor = card => validRecords
+      .filter(record => record.cardId === card.id)
+      .sort((a, b) => claimTimestamp(a) - claimTimestamp(b));
+    const lastClaimRecord = card => {
+      const list = recordsFor(card);
+      return list.length ? list[list.length - 1] : null;
+    };
     const lastClaim = card => {
-      let hit = "";
-      for (const [day, ids] of Object.entries(checkins)) {
-        if (Array.isArray(ids) && ids.includes(card.id) && day > hit) hit = day;
-      }
-      return hit;
+      const record = lastClaimRecord(card);
+      if (!record) return "";
+      const timestamp = claimTimestamp(record);
+      if (timestamp) return dateKey(new Date(timestamp));
+      return isValidDateKey(record.periodKey) ? record.periodKey : String(record.periodKey || "");
     };
 
-    const open = cards.filter(c => !claimed.has(c.id));
+    const open = cards.filter(card =>
+      isComputeCardInValidity(card, todayKey) && !claimed.has(card.id)
+    );
+    const valid = cards.filter(card => isComputeCardInValidity(card, todayKey));
     return {
       cards,
+      records,
       claimed,
       open,
       openCount: open.length,
-      openValue: open.reduce((s, c) => s + (Number(c.amount) || 0), 0),
+      openValue: open.reduce((sum, card) => sum + (Number(card.amount) || 0), 0),
       doneCount: claimed.size,
+      validCount: valid.length,
+      expiredCount: cards.length - valid.length,
       claimedValue,
-      total,
-      lastClaim
+      total: validRecords.length,
+      lastClaim,
+      lastClaimRecord
     };
   }
 
@@ -1805,20 +2278,20 @@ class MacAppLauncherView extends ItemView {
     const card = container.createDiv({ cls: "mal-album-entry" });
 
     const top = card.createDiv({ cls: "mal-album-entry-top" });
-    top.createSpan({ cls: "mal-album-entry-kicker", text: "算力打卡卡册" });
+    top.createSpan({ cls: "mal-album-entry-kicker", text: "AI 算力卡册" });
     top.createSpan({ cls: "mal-album-entry-badge", text: "⚡" });
     card.createDiv({ cls: "mal-album-entry-note", text: `累计已领 ¥${s.claimedValue} · 打卡 ${s.total} 次` });
 
     const mid = card.createDiv({ cls: "mal-album-entry-mid" });
     mid.createDiv({ cls: "mal-album-entry-value", text: `¥${s.openValue}` });
-    mid.createDiv({ cls: "mal-album-entry-sub", text: `今日可领 · 已收 ${s.doneCount}/${total} 张` });
+    mid.createDiv({ cls: "mal-album-entry-sub", text: `当前可领 · 已收 ${s.doneCount}/${total} 张` });
 
     const bar = card.createDiv({ cls: "mal-album-entry-bar" });
     const fill = bar.createDiv({ cls: "mal-album-entry-fill" });
     fill.style.width = total ? `${Math.max(4, Math.round(s.doneCount / total * 100))}%` : "0";
 
     card.createDiv({ cls: "mal-album-entry-cta", text: "打开卡册 ›" });
-    card.setAttribute("title", "打开算力打卡卡册");
+    card.setAttribute("title", "打开 AI 算力卡册");
     card.addEventListener("click", () => {
       this.mode = "album";
       this.render();
@@ -1826,8 +2299,14 @@ class MacAppLauncherView extends ItemView {
   }
 
   // 卡册页：说明条 + 统计卡 + 周期筛选 + 分组卡片
-  renderAlbum(body) {
+  renderAlbum(body, term = "") {
     const s = this.computeSummary();
+    const query = String(term || "").trim().toLocaleLowerCase();
+    const matchedCards = query ? s.cards.filter(card => {
+      const app = this.resolveCardApp(card);
+      return `${card.name || ""} ${card.group || ""} ${card.desc || ""} ${card.url || ""} ${app?.name || ""} ${app?.category || ""}`
+        .toLocaleLowerCase().includes(query);
+    }) : s.cards;
     const wrap = body.createDiv({ cls: "mal-album" });
 
     wrap.createDiv({
@@ -1842,104 +2321,44 @@ class MacAppLauncherView extends ItemView {
       box.createDiv({ cls: "mal-album-stat-value", text: value });
       box.createDiv({ cls: "mal-album-stat-sub", text: sub });
     };
-    stat("今天可领价值", `¥${s.openValue}`, `${s.openCount} 个福利待领`, true);
+    stat("当前可领价值", `¥${s.openValue}`, `${s.openCount} 个有效福利待领`, true);
     stat("本周期已收", `${s.doneCount} 张`, `卡册共 ${s.cards.length} 张`, false);
     stat("累计已领价值", `¥${s.claimedValue}`, `共打卡 ${s.total} 次`, false);
 
-    // 全年活跃热力图：从首页移入卡册页，GitHub 风格展示近一年启动记录
-    const heat = wrap.createDiv({ cls: "mal-album-heat" });
-    const heatHead = heat.createDiv({ cls: "mal-cal-head" });
-    const heatMain = heatHead.createDiv({ cls: "mal-cal-head-main" });
-    heatMain.createDiv({ cls: "mal-cal-title", text: "全年活跃" });
-    const daily = this.plugin.settings.launchDaily || {};
-    const todayCount = daily[dateKey(new Date())] || 0;
-    heatMain.createDiv({ cls: "mal-cal-today", text: todayCount ? `今日 ${todayCount} 次` : "今日暂无" });
-    const heatNav = heatHead.createDiv({ cls: "mal-cal-nav" });
-    if (this.hasRecentActivity(daily)) {
-      this.renderYearMap(heat, daily, this.calLegend(heatNav));
-    } else {
-      heatNav.createDiv({ cls: "mal-cal-total", text: "近一年共 0 次" });
-      this.renderYearEmpty(heat);
-    }
-
     const head = wrap.createDiv({ cls: "mal-album-head" });
-    head.createEl("h3", { text: "我的卡册" });
+    head.createEl("h3", { text: "AI 算力卡册" });
     const tools = head.createDiv({ cls: "mal-album-tools" });
-    tools.createSpan({ cls: "mal-album-count", text: `${s.cards.length} 张 · 已收 ${s.doneCount} 张` });
+    tools.createSpan({ cls: "mal-album-count", text: `${s.cards.length} 张 · 有效 ${s.validCount} 张 · 已收 ${s.doneCount} 张` });
     const add = tools.createEl("button", { cls: "mal-album-pill is-dark", text: "+ 添加卡片" });
     add.addEventListener("click", () => {
       new ComputeCardModal(this.app, this.plugin, null, () => this.render()).open();
     });
 
+    // 卡册排序：一次性未领取 > 每日/每月（周期性） > 一次性已领取
+    const cardRank = card => {
+      const cycle = card.cycle || "daily";
+      const claimed = s.claimed.has(card.id);
+      if (cycle === "once") return claimed ? 2 : 0;
+      return 1;
+    };
+    const sortedCards = [...matchedCards].sort((a, b) => cardRank(a) - cardRank(b));
+
     // 卡册网格：卡片收集进度的可视化，点开看详情
     const shelf = wrap.createDiv({ cls: "mal-album-shelf" });
-    if (s.cards.length) {
-      for (const card of s.cards) this.renderShelfCard(shelf, card, s);
-    } else {
+    if (sortedCards.length) {
+      for (const card of sortedCards) this.renderShelfCard(shelf, card, s);
+    } else if (!query) {
       shelf.createEl("p", { cls: "mal-muted", text: "还没有卡片，点「+ 添加卡片」开始收集。" });
-    }
-
-    wrap.createDiv({ cls: "mal-album-divider" });
-
-    // 周期筛选：全部 / 每日 / 每月 / 一次性
-    const filters = [
-      { key: "all", label: "全部" },
-      { key: "daily", label: "每日" },
-      { key: "monthly", label: "每月" },
-      { key: "once", label: "一次性" }
-    ];
-    if (!this.albumFilter) this.albumFilter = "all";
-    const bars = wrap.createDiv({ cls: "mal-album-filters" });
-    for (const f of filters) {
-      const chip = bars.createEl("button", {
-        cls: `mal-nav-chip${this.albumFilter === f.key ? " is-active" : ""}`,
-        text: f.label
-      });
-      chip.addEventListener("click", () => {
-        this.albumFilter = f.key;
-        this.render();
-      });
-    }
-    if (this.albumFilter !== "all") {
-      const hint = bars.createSpan({ cls: "mal-album-filter-hint", text: "点卡片看详情，从详情里可去领取" });
-      hint.setAttribute("aria-hidden", "true");
-    }
-
-    const shown = s.cards.filter(c => this.albumFilter === "all" || (c.cycle || "daily") === this.albumFilter);
-    if (!shown.length) {
-      wrap.createEl("p", { cls: "mal-muted", text: "这个筛选下还没有卡片，点右上角「+ 添加卡片」添加。" });
-      return;
-    }
-
-    const groups = ["新人礼包", "服务器 GPU", "每日福利", "每月福利"];
-    for (const g of [...groups, ...new Set(shown.map(c => c.group).filter(x => !x || !groups.includes(x)))]) {
-      const items = shown.filter(c => (c.group || "自定义") === (g || "自定义"));
-      if (!items.length) continue;
-      const section = wrap.createDiv({ cls: "mal-album-section" });
-      const themeMap = { "新人礼包": "newbie", "服务器 GPU": "gpu", "每日福利": "daily", "每月福利": "monthly" };
-      const iconMap = { "新人礼包": "🎁", "服务器 GPU": "🖥️", "每日福利": "☀️", "每月福利": "📅" };
-      section.setAttribute("data-theme", themeMap[g] || "custom");
-      const groupHead = section.createDiv({ cls: "mal-album-group-head" });
-      groupHead.createEl("h4", {
-        cls: "mal-album-group",
-        text: `${iconMap[g] ? iconMap[g] + " " : ""}${g || "自定义"}`
-      });
-      const groupDone = items.filter(c => s.claimed.has(c.id)).length;
-      groupHead.createSpan({
-        cls: `mal-album-group-badge${groupDone ? " is-done" : ""}`,
-        text: `${groupDone}/${items.length} 已领`
-      });
-      const grid = section.createDiv({ cls: "mal-album-list" });
-      for (const card of items) this.renderAlbumCard(grid, card, s);
     }
   }
 
   // 卡册网格里的单张卡：面值在上、图标居中、名称与状态在下
   renderShelfCard(grid, card, s) {
     const claimed = s.claimed.has(card.id);
+    const available = isComputeCardInValidity(card);
     const cycle = card.cycle || "daily";
     const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
-    const el = grid.createDiv({ cls: `mal-shelf-card${claimed ? " is-claimed" : ""}` });
+    const el = grid.createDiv({ cls: `mal-shelf-card${claimed ? " is-claimed" : ""}${!available ? " is-expired" : ""}` });
 
     const top = el.createDiv({ cls: "mal-shelf-top" });
     top.createSpan({ cls: "mal-shelf-value", text: card.value || "—" });
@@ -1949,7 +2368,8 @@ class MacAppLauncherView extends ItemView {
     icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 18%, transparent)`;
 
     el.createDiv({ cls: "mal-shelf-name", text: card.name });
-    el.createDiv({ cls: "mal-shelf-meta", text: `${cycleLabel} · ${claimed ? "已收" : "待收"}` });
+    const statusLabel = claimed ? "已收" : !available ? (card.enabled === false ? "已停用" : "未生效 / 已过期") : "待收";
+    el.createDiv({ cls: "mal-shelf-meta", text: `${cycleLabel} · ${statusLabel}` });
 
     el.setAttribute("title", `${card.name} · ${card.value || ""}${claimed ? " · 已收" : " · 待收"}`);
     el.addEventListener("click", () => this.openCardDetail(card));
@@ -1961,9 +2381,10 @@ class MacAppLauncherView extends ItemView {
 
   renderAlbumCard(grid, card, s) {
     const claimed = s.claimed.has(card.id);
+    const available = isComputeCardInValidity(card);
     const cycle = card.cycle || "daily";
     const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
-    const el = grid.createDiv({ cls: `mal-album-row${claimed ? " is-claimed" : ""}` });
+    const el = grid.createDiv({ cls: `mal-album-row${claimed ? " is-claimed" : ""}${!isComputeCardInValidity(card) ? " is-expired" : ""}` });
 
     const icon = el.createDiv({ cls: "mal-album-row-icon", text: card.emoji || "⚡" });
     icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 16%, transparent)`;
@@ -1979,11 +2400,17 @@ class MacAppLauncherView extends ItemView {
       cls: `mal-album-row-state${claimed ? " is-done" : ""}`,
       text: claimed
         ? (cycle === "once" ? "已收入卡册" : cycle === "daily" ? "今天已领 · 明天再来" : "本月已领 · 下月再来")
-        : (cycle === "once" ? "一次性福利" : cycle === "daily" ? "每日可领一次" : "每月可领一次")
+        : !available
+          ? (card.enabled === false ? "已停用" : "不在福利有效期")
+          : (cycle === "once" ? "一次性福利" : cycle === "daily" ? "每日可领一次" : "每月可领一次")
     });
     const localApp = this.resolveCardApp(card);
-    if (card.amount) meta.createSpan({ cls: "mal-album-row-chip is-soft", text: `约 ¥${card.amount}` });
-    if (localApp) meta.createSpan({ cls: "mal-album-row-chip is-client", text: `🖥 ${localApp.name}` });
+    const installed = isAppBundleInstalled(localApp);
+    if (card.amount) meta.createSpan({ cls: "mal-album-row-chip is-soft", text: `参考估值 ¥${card.amount}` });
+    if (localApp) meta.createSpan({
+      cls: `mal-album-row-chip ${installed ? "is-client" : "is-web"}`,
+      text: `${installed ? "客户端可用" : isWebOnlyApp(localApp) ? "网页应用" : "客户端未安装"} · ${localApp.name}`
+    });
     const detailLink = meta.createSpan({ cls: "mal-album-row-link", text: "📖 福利详情" });
     detailLink.addEventListener("click", event => {
       event.stopPropagation();
@@ -1991,53 +2418,50 @@ class MacAppLauncherView extends ItemView {
     });
 
     const side = el.createDiv({ cls: "mal-album-row-side" });
+    const webUrl = this.getCardWebUrl(card, localApp);
     if (claimed) {
       const last = s.lastClaim(card);
       const stamp = side.createDiv({ cls: "mal-album-stamp" });
-      stamp.createDiv({ cls: "mal-album-stamp-main", text: cycle === "daily" ? "今天已领" : "已领取" });
+      stamp.createDiv({ cls: "mal-album-stamp-main", text: cycle === "daily" ? "今天已领" : cycle === "monthly" ? "本月已领" : "已收入卡册" });
       if (last) stamp.createDiv({ cls: "mal-album-stamp-date", text: `${Number(last.slice(5, 7))}.${Number(last.slice(8, 10))}` });
+    } else if (!available) {
+      side.createSpan({ cls: "mal-album-row-state", text: card.enabled === false ? "已停用" : "不在福利有效期" });
     } else {
-      if (localApp) {
-        // Smart：默认启动本地客户端；下拉菜单保留网页入口。启动本身不记账。
-        const wrap = side.createDiv({ cls: "mal-album-go-wrap" });
-        const mainBtn = wrap.createEl("button", { cls: "mal-album-go is-main", text: "打开客户端" });
-        mainBtn.setAttribute("title", `打开本地应用 ${localApp.name}；完成领取后需手动标记`);
-        mainBtn.addEventListener("click", async event => {
+      const installed = isAppBundleInstalled(localApp);
+      if (installed || webUrl) {
+        const mainLabel = installed ? "打开客户端" : "打开网页";
+        const go = side.createEl("button", { cls: "mal-album-go", text: `${mainLabel} ↗` });
+        go.setAttribute("title", "Smart：优先打开可用客户端，否则打开网页");
+        go.addEventListener("click", async event => {
           event.stopPropagation();
-          const opened = await this.launchOrOpen(card, localApp);
+          const opened = await this.launchOrOpen(card, localApp, "smart");
           if (opened) new Notice("入口已打开。完成实际领取后，返回卡册点击「标记已收」。", 6000);
         });
-        const arrow = wrap.createEl("button", { cls: "mal-album-go is-arrow", text: "▾" });
-        arrow.setAttribute("title", "切换启动方式");
-        arrow.addEventListener("click", event => {
-          event.stopPropagation();
-          const menu = new Menu();
-          menu.addItem(item => item
-            .setTitle(`打开客户端 · ${localApp.name}`)
-            .setIcon("play")
-            .onClick(async () => {
-              const opened = await this.launchOrOpen(card, localApp);
-              if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
-            }));
-          if (card.url) {
+        if (installed && webUrl) {
+          const arrow = side.createEl("button", { cls: "mal-album-go is-arrow", text: "▾" });
+          arrow.setAttribute("title", "手动切换客户端或网页");
+          arrow.addEventListener("click", event => {
+            event.stopPropagation();
+            const menu = new Menu();
+            menu.addItem(item => item
+              .setTitle(`打开客户端 · ${localApp.name}`)
+              .setIcon("play")
+              .onClick(async () => {
+                const opened = await this.launchOrOpen(card, localApp, "client");
+                if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
+              }));
             menu.addItem(item => item
               .setTitle("打开网页 ↗")
               .setIcon("external-link")
               .onClick(async () => {
-                const opened = await this.openUrlOnly(card);
+                const opened = await this.openUrlOnly(card, localApp);
                 if (opened) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
               }));
-          }
-          menu.showAtEvent(event);
-        });
-      } else if (card.url) {
-        // 没有匹配到本地客户端时，使用网页入口。
-        const go = side.createEl("button", { cls: "mal-album-go", text: "打开网页 ↗" });
-        go.addEventListener("click", async event => {
-          event.stopPropagation();
-          const opened = await this.launchOrOpen(card, null);
-          if (opened) new Notice("网页入口已打开。完成实际领取后，返回卡册点击「标记已收」。", 6000);
-        });
+            menu.showAtEvent(event);
+          });
+        }
+      } else {
+        side.createSpan({ cls: "mal-album-row-state", text: "尚未配置启动入口" });
       }
 
       // 人工确认是唯一写入领取记录的入口；启动客户端/网页不会自动打卡。
@@ -2069,6 +2493,10 @@ class MacAppLauncherView extends ItemView {
       const last = s.lastClaim(card);
       const cycle = card.cycle || "daily";
       const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
+      const localApp = this.resolveCardApp(card);
+      const installed = isAppBundleInstalled(localApp);
+      const webUrl = this.getCardWebUrl(card, localApp);
+      const available = isComputeCardInValidity(card);
 
       const top = el.createDiv({ cls: "mal-compute-detail-top" });
       const icon = top.createDiv({ cls: "mal-album-card-icon", text: card.emoji || "⚡" });
@@ -2077,21 +2505,62 @@ class MacAppLauncherView extends ItemView {
       names.createEl("h3", { text: card.name });
       names.createDiv({
         cls: "mal-detail-meta",
-        text: `${card.value || "—"}${card.amount ? ` · 约 ¥${card.amount}` : ""} · ${cycleLabel}`
+        text: `${card.value || "—"}${card.amount ? ` · 参考估值 ¥${card.amount}` : ""} · ${cycleLabel}`
       });
 
       if (card.desc) el.createEl("p", { cls: "mal-compute-detail-desc", text: card.desc });
-
-      const localApp = this.resolveCardApp(card);
       if (localApp) {
-        el.createEl("p", { cls: "mal-compute-detail-desc", text: `已关联本地应用「${localApp.name}」。默认优先打开客户端，也可以切换到网页。` });
+        el.createEl("p", {
+          cls: "mal-compute-detail-desc",
+          text: `关联应用：${localApp.name} · ${installed ? "检测到本地客户端" : isWebOnlyApp(localApp) ? "网页应用资源" : "本地客户端当前不可用"}`
+        });
+      }
+      if (webUrl) {
+        el.createEl("p", { cls: "mal-compute-detail-desc", text: `网页备用入口：${webUrl}` });
+      }
+      if (card.validFrom || card.validUntil) {
+        el.createEl("p", {
+          cls: "mal-compute-detail-desc",
+          text: `有效期：${card.validFrom || "不限"} 至 ${card.validUntil || "不限"}`
+        });
       }
 
       const status = el.createDiv({ cls: `mal-compute-detail-status${claimed ? " is-done" : ""}` });
       status.setText(claimed
         ? `本周期已收${last ? ` · ${last}` : ""}`
-        : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
-      if (!claimed) {
+        : !available
+          ? (card.enabled === false ? "此福利已停用" : "当前不在福利有效期")
+          : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
+
+      const history = s.records
+        .filter(record => record.cardId === card.id)
+        .sort((a, b) => claimTimestamp(b) - claimTimestamp(a))
+        .slice(0, 8);
+      const historySection = el.createDiv({ cls: "mal-compute-history" });
+      historySection.createDiv({ cls: "mal-detail-label", text: `领取历史（${history.length} 条最近记录）` });
+      if (history.length) {
+        for (const record of history) {
+          const row = historySection.createDiv({ cls: "mal-compute-history-row" });
+          const timestamp = claimTimestamp(record);
+          const date = timestamp
+            ? dateKey(new Date(timestamp))
+            : (isValidDateKey(record.periodKey) ? record.periodKey : String(record.periodKey || "日期未知"));
+          const period = canonicalClaimPeriod(record, card);
+          row.createSpan({ text: date, cls: "mal-compute-history-date" });
+          row.createSpan({
+            text: period === "once" ? "一次性" : /^\d{4}-\d{2}$/.test(period) ? "月度" : "每日",
+            cls: "mal-compute-history-period"
+          });
+          row.createSpan({
+            text: `领取时估值 ¥${Number(record.amountSnapshot) || 0}`,
+            cls: "mal-compute-history-value"
+          });
+        }
+      } else {
+        historySection.createDiv({ text: "尚无领取记录", cls: "mal-detail-meta" });
+      }
+
+      if (!claimed && available) {
         el.createEl("p", {
           cls: "mal-muted",
           text: "打开客户端或网页不会自动记为已领取。完成实际领取后，请返回这里点击「标记已收」。"
@@ -2099,54 +2568,50 @@ class MacAppLauncherView extends ItemView {
       }
 
       const actions = el.createDiv({ cls: "mal-mood-actions" });
-      if (localApp || card.url) {
-        if (localApp) {
-          // 装了客户端 → 主按钮（默认启动客户端）+ 箭头下拉
-          const btnWrap = actions.createDiv({ cls: "mal-detail-go-wrap" });
-          const mainBtn = btnWrap.createEl("button", { cls: "mod-cta", text: "打开客户端" });
+      if (!claimed && available) {
+        if (installed || webUrl) {
+          const mainLabel = installed ? "打开客户端" : "打开网页";
+          const mainBtn = actions.createEl("button", { cls: "mod-cta", text: `${mainLabel} ↗` });
           mainBtn.addEventListener("click", async () => {
-            const opened = await this.launchOrOpen(card, localApp);
-            if (opened && !claimed) new Notice("入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
+            const opened = await this.launchOrOpen(card, localApp, "smart");
+            if (opened) new Notice("入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
           });
-          const arrow = btnWrap.createEl("button", { cls: "mod-cta is-arrow", text: "▾" });
-          arrow.addEventListener("click", event => {
-            event.stopPropagation();
-            const menu = new Menu();
-            menu.addItem(item => item
-              .setTitle(`打开客户端 · ${localApp.name}`)
-              .setIcon("play")
-              .onClick(async () => {
-                const opened = await this.launchOrOpen(card, localApp);
-                if (opened && !claimed) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
-              }));
-            if (card.url) {
+          if (installed && webUrl) {
+            const arrow = actions.createEl("button", { text: "切换入口 ▾" });
+            arrow.addEventListener("click", event => {
+              event.stopPropagation();
+              const menu = new Menu();
+              menu.addItem(item => item
+                .setTitle(`打开客户端 · ${localApp.name}`)
+                .setIcon("play")
+                .onClick(async () => {
+                  const opened = await this.launchOrOpen(card, localApp, "client");
+                  if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
+                }));
               menu.addItem(item => item
                 .setTitle("打开网页 ↗")
                 .setIcon("external-link")
                 .onClick(async () => {
-                  const opened = await this.openUrlOnly(card);
-                  if (opened && !claimed) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
+                  const opened = await this.openUrlOnly(card, localApp);
+                  if (opened) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
                 }));
-            }
-            menu.showAtEvent(event);
-          });
+              menu.showAtEvent(event);
+            });
+          }
         } else {
-          const go = actions.createEl("button", { cls: "mod-cta", text: "打开网页 ↗" });
-          go.addEventListener("click", async () => {
-            const opened = await this.launchOrOpen(card, null);
-            if (opened && !claimed) new Notice("网页入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
-          });
+          actions.createSpan({ cls: "mal-muted", text: "尚未配置可用的客户端或网页入口" });
         }
       }
+
       if (claimed) {
-        const undo = actions.createEl("button", { text: "取消打卡" });
+        const undo = actions.createEl("button", { text: "取消本周期记录" });
         undo.addEventListener("click", async () => {
           await this.uncheckCard(card);
           modal.close();
           this.render();
         });
-      } else {
-        const mark = actions.createEl("button", { text: "标记已收" });
+      } else if (available) {
+        const mark = actions.createEl("button", { text: "标记已收", cls: "mal-compute-confirm-detail" });
         mark.addEventListener("click", async () => {
           await this.checkinCard(card.id);
           modal.close();
@@ -2163,54 +2628,141 @@ class MacAppLauncherView extends ItemView {
     modal.open();
   }
 
-  // 卡片 → 本地已安装应用：装了客户端就启动客户端，否则开网页
+  // 福利卡片通过稳定 appId 关联统一应用资源。
   resolveCardApp(card) {
     return resolveComputeCardApp(card, this.plugin.settings.apps || []);
   }
 
-  // 强制走网页入口，忽略本地客户端（给双向切换用）
-  async openUrlOnly(card) {
-    if (card.url) return openExternalUrl(card.url);
-    new Notice(`「${card.name}」没有领取网页`);
-    return false;
+  getCardWebUrl(card, app = this.resolveCardApp(card)) {
+    const cardUrl = normalizeExternalHttpUrl(card?.url || "");
+    if (cardUrl) return cardUrl;
+    if (app && isSystemAppPath(app.path)) return "";
+    return normalizeExternalHttpUrl(app?.websiteUrl || "") || "";
   }
 
-  // Smart：优先启动已关联的本地客户端；客户端不可用时回退到本卡片的领取网页。
-  async launchOrOpen(card, localApp) {
+  // 手动选择网页入口；优先使用卡片专属领取链接，否则回退到应用官方网站。
+  async openUrlOnly(card, localApp) {
     const app = localApp || this.resolveCardApp(card);
-    if (app) {
-      const result = await this.plugin.launchApp(app, { silent: true });
-      if (result && result.ok) return true;
+    const url = this.getCardWebUrl(card, app);
+    if (!url) {
+      new Notice(`「${card.name}」没有配置网页入口`);
+      return false;
     }
-    if (card.url) return openExternalUrl(card.url);
-    new Notice(`「${card.name}」没有可用的本地客户端或领取网页`);
+    if (app) {
+      const result = await this.plugin.launchApp(app, { silent: true, forceWeb: true, fallbackUrl: url });
+      return !!(result && result.ok);
+    }
+    return openExternalUrl(url);
+  }
+
+  // Smart：优先启动有效的本地客户端；客户端不可用或启动失败时回退网页。
+  async launchOrOpen(card, localApp, mode = "smart") {
+    const app = localApp || this.resolveCardApp(card);
+    const webUrl = this.getCardWebUrl(card, app);
+    if (mode === "web") {
+      if (webUrl) return openExternalUrl(webUrl);
+      new Notice(`「${card.name}」没有配置网页入口`);
+      return false;
+    }
+    if (app && isAppBundleInstalled(app)) {
+      const result = await this.plugin.launchApp(app, {
+        silent: true,
+        fallbackUrl: webUrl
+      });
+      return !!(result && result.ok);
+    }
+    if (webUrl) return openExternalUrl(webUrl);
+    new Notice(`「${card.name}」既没有可用客户端，也没有网页入口`);
     return false;
   }
 
   async checkinCard(cardId) {
-    const key = dateKey(new Date());
-    const map = this.plugin.settings.computeCheckins || (this.plugin.settings.computeCheckins = {});
-    const list = Array.isArray(map[key]) ? map[key] : [];
-    if (!list.includes(cardId)) map[key] = [...list, cardId];
+    const card = (this.plugin.settings.computeCards || []).find(item => item.id === cardId);
+    if (!card) {
+      new Notice("找不到这张福利卡片");
+      return false;
+    }
+    if (!isComputeCardInValidity(card)) {
+      new Notice(card.enabled === false ? "这张福利卡片已停用" : "这张福利卡片当前不在有效期");
+      return false;
+    }
+    const todayKey = dateKey(new Date());
+    const cycle = card.cycle || "daily";
+    const periodKey = cycle === "once" ? "once" : cycle === "monthly" ? todayKey.slice(0, 7) : todayKey;
+    const records = Array.isArray(this.plugin.settings.computeClaimRecords)
+      ? this.plugin.settings.computeClaimRecords
+      : (this.plugin.settings.computeClaimRecords = []);
+    const alreadyClaimed = records.some(record =>
+      String(record.cardId || "") === String(cardId) &&
+      canonicalClaimPeriod(record, card) === periodKey
+    );
+    if (alreadyClaimed) {
+      new Notice(cycle === "once" ? "这张一次性福利已经记录过" : "本周期已经记录过领取");
+      return false;
+    }
+    const claimedAt = Date.now();
+    records.push(normalizeClaimRecord({
+      id: `claim-${cardId}-${claimedAt.toString(36)}`,
+      cardId,
+      periodKey,
+      claimedAt,
+      amountSnapshot: Number(card.amount) || 0,
+      valueSnapshot: card.value || "",
+      currency: card.currency || "CNY",
+      source: "manual"
+    }, records.length));
+    // 双写旧日期映射，方便用户临时回退到 1.27.x 时仍能看到新打卡日期。
+    const legacyMap = this.plugin.settings.computeCheckins || (this.plugin.settings.computeCheckins = {});
+    const legacyList = Array.isArray(legacyMap[todayKey]) ? legacyMap[todayKey] : [];
+    if (!legacyList.includes(cardId)) legacyMap[todayKey] = [...legacyList, cardId];
     await this.plugin.saveSettings();
+    new Notice("已记录本次领取");
+    return true;
   }
 
-  // 取消：移除该卡最近一次打卡记录
+  // 撤销当前周期最近一条人工确认记录，不改动其他日期或周期。
   async uncheckCard(card) {
-    const s = this.computeSummary();
-    const day = s.lastClaim(card);
-    if (!day) return;
-    const map = this.plugin.settings.computeCheckins || {};
-    const ids = (map[day] || []).filter(id => id !== card.id);
-    if (ids.length) map[day] = ids;
-    else delete map[day];
+    const records = Array.isArray(this.plugin.settings.computeClaimRecords)
+      ? this.plugin.settings.computeClaimRecords
+      : [];
+    const cycle = card.cycle || "daily";
+    const todayKey = dateKey(new Date());
+    const periodKey = cycle === "once" ? "once" : cycle === "monthly" ? todayKey.slice(0, 7) : todayKey;
+    const candidates = records
+      .map((record, index) => ({ record, index }))
+      .filter(item => String(item.record.cardId || "") === String(card.id) &&
+        canonicalClaimPeriod(item.record, card) === periodKey)
+      .sort((a, b) => claimTimestamp(b.record) - claimTimestamp(a.record));
+    if (!candidates.length) return false;
+    const removed = candidates[0].record;
+    records.splice(candidates[0].index, 1);
+    const removedTimestamp = claimTimestamp(removed);
+    const removedDay = removedTimestamp
+      ? dateKey(new Date(removedTimestamp))
+      : (isValidDateKey(removed.periodKey) ? removed.periodKey : "");
+    const legacyMap = this.plugin.settings.computeCheckins || {};
+    if (removedDay) {
+      const legacyIds = (legacyMap[removedDay] || []).filter(id => id !== card.id);
+      if (legacyIds.length) legacyMap[removedDay] = legacyIds;
+      else delete legacyMap[removedDay];
+    }
     await this.plugin.saveSettings();
+    new Notice("已撤销本周期领取记录");
+    return true;
   }
 
   openAlbumCardMenu(card, event) {
     const menu = new Menu();
-    if (card.url) {
-      menu.addItem(item => item.setTitle("打开福利页").setIcon("external-link").onClick(() => openExternalUrl(card.url)));
+    const app = this.resolveCardApp(card);
+    const webUrl = this.getCardWebUrl(card, app);
+    if (webUrl) {
+      menu.addItem(item => item.setTitle("打开网页入口").setIcon("external-link").onClick(() => openExternalUrl(webUrl)));
+    }
+    if (app && isAppBundleInstalled(app)) {
+      menu.addItem(item => item
+        .setTitle(`打开客户端 · ${app.name}`)
+        .setIcon("monitor")
+        .onClick(() => this.launchOrOpen(card, app, "client")));
     }
     menu.addItem(item => item.setTitle("编辑卡片").setIcon("pencil").onClick(() => {
       new ComputeCardModal(this.app, this.plugin, card, () => this.render()).open();
@@ -2220,11 +2772,28 @@ class MacAppLauncherView extends ItemView {
       new Notice("已复制卡片信息");
     }));
     menu.addSeparator();
-    menu.addItem(item => item.setTitle("删除卡片").setIcon("trash").onClick(async () => {
-      this.plugin.settings.computeCards = (this.plugin.settings.computeCards || []).filter(c => c.id !== card.id);
+    menu.addItem(item => item.setTitle("删除卡片及其领取记录").setIcon("trash").onClick(async () => {
+      const confirmed = typeof window.confirm === "function"
+        ? window.confirm(`确定删除「${card.name}」及其历史领取记录吗？此操作不可撤销。`)
+        : true;
+      if (!confirmed) return;
+      this.plugin.settings.computeCards = (this.plugin.settings.computeCards || []).filter(item => item.id !== card.id);
+      this.plugin.settings.computeClaimRecords = (this.plugin.settings.computeClaimRecords || []).filter(record => record.cardId !== card.id);
+      // 删除的是默认卡时记入黑名单，避免作者后续新增默认卡时把已删的卡重新并入。
+      if (DEFAULT_COMPUTE_CARDS.some(def => String(def.id) === String(card.id))) {
+        const deleted = new Set((this.plugin.settings.deletedCardIds || []).map(String));
+        deleted.add(String(card.id));
+        this.plugin.settings.deletedCardIds = [...deleted];
+      }
+      // 清理旧版映射中的同一卡片记录，避免旧数据残留。
+      for (const [day, ids] of Object.entries(this.plugin.settings.computeCheckins || {})) {
+        const next = Array.isArray(ids) ? ids.filter(id => id !== card.id) : [];
+        if (next.length) this.plugin.settings.computeCheckins[day] = next;
+        else delete this.plugin.settings.computeCheckins[day];
+      }
       await this.plugin.saveSettings();
       this.render();
-      new Notice(`已删除卡片：${card.name}`);
+      new Notice(`已删除卡片及历史记录：${card.name}`);
     }));
     menu.showAtMouseEvent(event);
   }
@@ -2362,111 +2931,29 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
-  // 本篇笔记绑定区：展示 frontmatter 里声明的 apps / app-scene
-  renderNoteBindings(body) {
-    const bindings = this.plugin.getNoteBindings();
-    if (!bindings) return;
-    const section = body.createDiv({ cls: "mal-note-recs" });
-    section.createEl("h3", { text: "📌 本篇笔记绑定", cls: "mal-category" });
-    const bar = section.createDiv({ cls: "mal-bind-bar" });
-    const launchable = bindings.apps.filter(b => b.app);
-    if (launchable.length > 1) {
-      const all = bar.createEl("button", { text: `⚡ 全部启动（${launchable.length}）`, cls: "mal-nav-chip" });
-      all.addEventListener("click", async () => {
-        for (let i = 0; i < launchable.length; i++) {
-          await this.plugin.launchApp(launchable[i].app, { silent: true });
-          if (i < launchable.length - 1) await new Promise(r => setTimeout(r, 500));
-        }
-        new Notice(`已启动 ${launchable.length} 个绑定应用`);
-      });
-    }
-    for (const s of bindings.scenes) {
-      const chip = bar.createEl("button", { text: `▶ 场景：${s.name}`, cls: "mal-nav-chip" });
-      chip.addEventListener("click", () => {
-        if (s.scene) this.plugin.launchScene(s.scene);
-        else new Notice(`场景「${s.name}」不存在，请先在应用中心创建`);
-      });
-    }
-    if (bindings.apps.length) {
-      const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
-      for (const b of bindings.apps) {
-        const card = grid.createDiv({
-          cls: `mal-app-card ${b.app ? "" : "is-missing"}`,
-          attr: { tabindex: "0", role: "button", "aria-label": `启动 ${b.name}` }
-        });
-        const icon = card.createDiv({ cls: "mal-app-icon" });
-        if (b.app) this.plugin.renderAppIcon(icon, b.app);
-        else icon.createEl("span", { text: "❔", cls: "mal-fallback-icon" });
-        card.createDiv({ text: b.app ? b.app.name : b.name, cls: "mal-app-name" });
-        card.addEventListener("click", () => {
-          if (b.app) this.plugin.launchApp(b.app);
-          else new Notice(`「${b.name}」不在应用列表中，请先扫描或手动添加`);
-        });
-      }
-    }
-  }
-
-  // 当前笔记推荐区：根据笔记名、文件夹与标签匹配应用，点击直接启动
-  renderNoteRecommendations(body) {
-    const recs = this.plugin.getNoteRecommendations(4);
-    if (!recs.length) return;
-    const file = this.plugin.getActiveNoteFile();
-    const section = body.createDiv({ cls: "mal-note-recs" });
-    section.createEl("h3", {
-      text: `✨ 当前笔记推荐${file ? `：${file.basename}` : ""}`,
-      cls: "mal-category"
-    });
-    const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""}` });
-    for (const app of recs) {
-      const card = grid.createDiv({
-        cls: "mal-app-card",
-        attr: { tabindex: "0", role: "button", "aria-label": `启动 ${app.name}`, title: `启动 ${app.name}` }
-      });
-      const icon = card.createDiv({ cls: "mal-app-icon" });
-      this.plugin.renderAppIcon(icon, app);
-      card.createDiv({ text: app.name, cls: "mal-app-name" });
-      card.addEventListener("click", () => this.plugin.launchApp(app));
-      card.addEventListener("keydown", event => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          this.plugin.launchApp(app);
-        }
-      });
-    }
-  }
-
   renderHome(body, term) {
     this.renderProgress(body);
-    const selected = this.plugin.settings.apps.filter(app => app.selected);
-    if (!this.plugin.settings.hasScanned && !selected.length) {
-      const empty = body.createDiv({ cls: "mal-empty-panel" });
-      empty.createEl("div", { text: "⌕", cls: "mal-empty-icon" });
-      empty.createEl("h3", { text: "先扫描你的 Mac 应用" });
-      empty.createEl("p", { text: "扫描后，你可以自己选择要展示的软件，并设置分类。" });
-      const btn = empty.createEl("button", { text: "扫描本机应用", cls: "mal-primary" });
-      btn.addEventListener("click", () => this.plugin.scanInstalledApps());
-      return;
-    }
-
-    const filteredSearch = selected.filter(app =>
-      `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
-    );
-    // 搜索时按结果流式排列；无搜索词时走可拖拽、可缩放的自由布局
-    if (term || this.plugin.settings.homeFreeLayout === false) {
-      this.renderClassicHome(body, selected, filteredSearch, term);
+    const selected = (this.plugin.settings.apps || []).filter(app => app.selected);
+    // 首页布局模式：classic 三栏工作区（默认） / album 常用应用 + 完整卡册
+    if ((this.plugin.settings.homeMode || "classic") === "album") {
+      this.renderQuickApps(body, selected, term);
+      this.renderAlbum(body, term);
     } else {
-      this.renderFreeHome(body, selected, filteredSearch);
+      const filteredSearch = selected.filter(app =>
+        `${app.name} ${app.path} ${app.category} ${app.description} ${app.usage}`.toLocaleLowerCase().includes(term)
+      );
+      this.renderClassicHome(body, selected, filteredSearch, term);
     }
-
     if (this.detailAppId) this.renderDetailPanel(body);
   }
 
   // 传统顺序排列（搜索状态、或关闭自由布局时使用）
   renderClassicHome(body, selected, filteredSearch, term) {
+    // 无搜索词：三栏工作区 + 下方完整卡册（与三栏等宽）
     if (!term) {
       this.renderDashboard(body, selected);
-      this.renderNoteBindings(body);
-      this.renderNoteRecommendations(body);
+      this.renderAlbum(body, "");
+      return;
     }
     this.renderCategoryNav(body, selected, term);
 
@@ -2504,12 +2991,6 @@ class MacAppLauncherView extends ItemView {
     const defs = [];
     if (this.plugin.settings.showActivityCalendar !== false) {
       defs.push({ id: "dashboard", w: 12, h: 6, autoHeight: true, render: target => this.renderDashboard(target, selected) });
-    }
-    if (this.plugin.getNoteBindings()) {
-      defs.push({ id: "noteBindings", w: 12, h: 6, autoHeight: true, render: target => this.renderNoteBindings(target) });
-    }
-    if (this.plugin.getNoteRecommendations(4).length) {
-      defs.push({ id: "noteRecs", w: 12, h: 6, autoHeight: true, render: target => this.renderNoteRecommendations(target) });
     }
     defs.push({ id: "nav", w: 12, h: 2, autoHeight: true, render: target => this.renderCategoryNav(target, selected, "") });
 
@@ -2919,6 +3400,12 @@ class MacAppLauncherView extends ItemView {
         this.editingDetail = true;
         this.render();
       }));
+    if (app.websiteUrl && !isSystemAppPath(app.path)) {
+      menu.addItem(item => item
+        .setTitle("打开官方网站 ↗")
+        .setIcon("external-link")
+        .onClick(() => this.plugin.launchApp(app, { forceWeb: true })));
+    }
     menu.addItem(item => item
       .setTitle(app.pinned ? "取消置顶" : "置顶应用")
       .setIcon("pin")
@@ -2927,29 +3414,27 @@ class MacAppLauncherView extends ItemView {
         this.render();
       }));
     menu.addSeparator();
-    menu.addItem(item => item
-      .setTitle("在 Finder 中显示")
-      .setIcon("folder-open")
-      .onClick(() => this.plugin.revealInFinder(app)));
-    menu.addItem(item => item
-      .setTitle("复制应用路径")
-      .setIcon("copy")
-      .onClick(() => {
-        navigator.clipboard.writeText(app.path || "");
-        new Notice("已复制应用路径");
-      }));
-    menu.addItem(item => item
-      .setTitle("打开 / 创建应用笔记")
-      .setIcon("file-text")
-      .onClick(() => this.plugin.openAppNote(app)));
+    if (app.path) {
+      menu.addItem(item => item
+        .setTitle("在 Finder 中显示")
+        .setIcon("folder-open")
+        .onClick(() => this.plugin.revealInFinder(app)));
+      menu.addItem(item => item
+        .setTitle("复制应用路径")
+        .setIcon("copy")
+        .onClick(() => {
+          navigator.clipboard.writeText(app.path || "");
+          new Notice("已复制应用路径");
+        }));
+    }
     // 启动参数白名单：编辑器打开当前库 / 终端进入笔记目录
-    if (this.plugin.isEditorApp(app)) {
+    if (app.path && this.plugin.isEditorApp(app)) {
       menu.addItem(item => item
         .setTitle(`用 ${app.name} 打开当前库`)
         .setIcon("vault")
         .onClick(() => this.plugin.openPathWithApp(app, this.app.vault.adapter.getBasePath())));
     }
-    if (this.plugin.isTerminalApp(app)) {
+    if (app.path && this.plugin.isTerminalApp(app)) {
       const note = this.plugin.getActiveNoteFile();
       const dir = note && note.parent && note.parent.path
         ? path.join(this.app.vault.adapter.getBasePath(), note.parent.path)
@@ -3008,7 +3493,12 @@ class MacAppLauncherView extends ItemView {
     icon.addEventListener("contextmenu", event => this.openAppMenu(app, event));
     const names = identity.createDiv({ cls: "mal-detail-names" });
     names.createEl("h3", { text: app.name });
-    names.createEl("div", { text: `${app.category || "未分类"} · ${app.path}`, cls: "mal-detail-meta" });
+    names.createEl("div", {
+      text: `${app.category || "未分类"} · ${isAppBundleInstalled(app) ? "客户端已安装" : app.websiteUrl ? "网页入口可用" : "客户端不可用"}`,
+      cls: "mal-detail-meta"
+    });
+    if (app.path) names.createEl("div", { text: app.path, cls: "mal-detail-meta mal-app-path" });
+    else if (app.websiteUrl) names.createEl("div", { text: "网页应用资源", cls: "mal-detail-meta mal-app-path" });
     const launches = app.launchCount || 0;
     const lastUsed = app.lastLaunchedAt
       ? new Date(app.lastLaunchedAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -3027,8 +3517,10 @@ class MacAppLauncherView extends ItemView {
       await this.plugin.togglePin(app);
       this.render();
     });
-    const reveal = actions.createEl("button", { text: "在 Finder 显示", cls: "mal-button" });
-    reveal.addEventListener("click", () => this.plugin.revealInFinder(app));
+    if (app.path) {
+      const reveal = actions.createEl("button", { text: "在 Finder 显示", cls: "mal-button" });
+      reveal.addEventListener("click", () => this.plugin.revealInFinder(app));
+    }
     if (app.custom) {
       const remove = actions.createEl("button", { text: "移除", cls: "mal-button mal-button-danger" });
       remove.addEventListener("click", async () => {
@@ -3058,6 +3550,21 @@ class MacAppLauncherView extends ItemView {
       });
       usage.value = app.usage || "";
 
+      panel.createEl("div", { text: "官方网站 / 网页备用入口", cls: "mal-detail-label" });
+      let websiteUrlInput = null;
+      if (isSystemAppPath(app.path)) {
+        panel.createEl("p", {
+          cls: "mal-muted",
+          text: "这是 macOS 系统应用，不配置官方网站入口。已有历史字段会保留，但不会作为应用网页入口使用。"
+        });
+      } else {
+        websiteUrlInput = panel.createEl("input", {
+          cls: "mal-detail-hotkey",
+          attr: { type: "url", placeholder: "https://example.com" }
+        });
+        websiteUrlInput.value = app.websiteUrl || "";
+      }
+
       panel.createEl("div", { text: "启动快捷键（可选，如 Mod+Shift+1，清空即取消）", cls: "mal-detail-label" });
       const hotkeyInput = panel.createEl("input", {
         cls: "mal-detail-hotkey",
@@ -3068,8 +3575,16 @@ class MacAppLauncherView extends ItemView {
       const editActions = panel.createDiv({ cls: "mal-detail-edit-actions" });
       const save = editActions.createEl("button", { text: "保存介绍", cls: "mal-primary" });
       save.addEventListener("click", async () => {
+        const rawWebsiteUrl = websiteUrlInput ? websiteUrlInput.value.trim() : "";
+        const safeWebsiteUrl = normalizeExternalHttpUrl(rawWebsiteUrl);
+        if (rawWebsiteUrl && !safeWebsiteUrl) {
+          new Notice("官方网站必须是有效的 http:// 或 https:// 地址", 6000);
+          return;
+        }
         app.description = description.value.trim();
         app.usage = usage.value.trim();
+        if (!isSystemAppPath(app.path)) app.websiteUrl = safeWebsiteUrl || "";
+        app.launchMode = "smart";
         const hotkey = hotkeyInput.value.trim();
         app.hotkey = hotkey;
         if (hotkey && !this.plugin.parseHotkey(hotkey)) {
@@ -3097,6 +3612,20 @@ class MacAppLauncherView extends ItemView {
         text: app.usage || "尚未填写使用场景。",
         cls: "mal-detail-description"
       });
+      panel.createEl("div", { text: "统一网页入口", cls: "mal-detail-label" });
+      const websiteRow = panel.createDiv({ cls: "mal-detail-note-row" });
+      if (isSystemAppPath(app.path)) {
+        websiteRow.createSpan({ cls: "mal-detail-meta", text: "macOS 系统应用不配置官方网站入口" });
+      } else {
+        websiteRow.createSpan({
+          cls: "mal-detail-meta",
+          text: app.websiteUrl || "尚未设置官方网站；可在编辑介绍中添加"
+        });
+        if (app.websiteUrl) {
+          const openWebsite = websiteRow.createEl("button", { text: "打开网页 ↗", cls: "mal-button" });
+          openWebsite.addEventListener("click", () => this.plugin.launchApp(app, { forceWeb: true }));
+        }
+      }
 
       const editActions = panel.createDiv({ cls: "mal-detail-edit-actions" });
       const edit = editActions.createEl("button", { text: "编辑介绍", cls: "mal-button" });
@@ -3106,36 +3635,39 @@ class MacAppLauncherView extends ItemView {
       });
     }
 
-    // 应用笔记与关联知识
-    panel.createEl("div", { text: "应用笔记与关联知识", cls: "mal-detail-label" });
-    const noteRow = panel.createDiv({ cls: "mal-detail-note-row" });
-    const noteFile = this.plugin.getAppNoteFile(app);
-    const noteBtn = noteRow.createEl("button", {
-      text: noteFile ? "📝 打开应用笔记" : "📝 创建应用笔记",
-      cls: "mal-button"
-    });
-    noteBtn.addEventListener("click", async () => {
-      this.detailAppId = null;
-      await this.plugin.openAppNote(app);
-    });
-    if (noteFile) {
-      const backlinks = this.plugin.getAppBacklinks(noteFile);
-      if (backlinks.length) {
-        const list = panel.createDiv({ cls: "mal-backlinks" });
-        for (const f of backlinks.slice(0, 8)) {
-          const link = list.createEl("button", { text: f.basename, cls: "mal-backlink" });
-          link.addEventListener("click", () => {
-            this.detailAppId = null;
-            this.app.workspace.getLeaf(false).openFile(f);
-          });
-        }
-      } else {
-        panel.createEl("p", { text: "还没有笔记链接到这篇应用资料卡。", cls: "mal-detail-meta" });
+    // 福利卡片不重复保存应用资料，只通过 appId 关联当前应用资源。
+    panel.createEl("div", { text: "关联算力福利", cls: "mal-detail-label" });
+    const linkedCards = (this.plugin.settings.computeCards || []).filter(card => card.appId === app.id);
+    if (linkedCards.length) {
+      const linkedList = panel.createDiv({ cls: "mal-app-linked-benefits" });
+      for (const card of linkedCards) {
+        const row = linkedList.createDiv({ cls: "mal-app-linked-benefit" });
+        const info = row.createDiv({ cls: "mal-app-linked-benefit-info" });
+        info.createDiv({ cls: "mal-app-linked-benefit-title", text: card.name });
+        info.createDiv({
+          cls: "mal-detail-meta",
+          text: `${card.cycle === "once" ? "一次性" : card.cycle === "monthly" ? "每月" : "每日"} · ${card.value || "福利"}`
+        });
+        const openCard = row.createEl("button", { text: "查看", cls: "mal-button" });
+        openCard.addEventListener("click", () => {
+          this.detailAppId = null;
+          this.mode = "album";
+          this.render();
+          this.openCardDetail(card);
+        });
       }
+    } else {
+      panel.createEl("p", { text: "暂无关联福利卡片。可在算力卡册编辑福利时关联此应用。", cls: "mal-detail-meta" });
     }
+    const openAlbum = panel.createEl("button", { text: "打开算力卡册", cls: "mal-button" });
+    openAlbum.addEventListener("click", () => {
+      this.detailAppId = null;
+      this.mode = "album";
+      this.render();
+    });
 
     const footer = panel.createDiv({ cls: "mal-detail-footer" });
-    const launch = footer.createEl("button", { text: `打开 ${app.name}`, cls: "mal-launch-button" });
+    const launch = footer.createEl("button", { text: `智能打开 ${app.name}`, cls: "mal-launch-button" });
     launch.addEventListener("click", () => this.plugin.launchApp(app));
   }
 
@@ -3284,7 +3816,7 @@ class MacAppLauncherView extends ItemView {
         el.addEventListener("click", () => setSelected(!app.selected));
       }
       info.createEl("div", { text: app.name, cls: "mal-manage-name" });
-      info.createEl("div", { text: app.path, cls: "mal-app-path" });
+      info.createEl("div", { text: app.path || app.websiteUrl || "网页应用", cls: "mal-app-path" });
 
       const tools = row.createDiv({ cls: "mal-manage-tools" });
       const categoryInput = tools.createEl("input", {
@@ -3448,6 +3980,43 @@ class MacAppLauncherView extends ItemView {
         new Notice(`添加失败：${error.message || error}`, 6000);
         btn.removeAttribute("disabled");
       }
+    });
+
+    const webRow = panel.createDiv({ cls: "mal-add-custom-web-row" });
+    webRow.createSpan({ cls: "mal-add-custom-hint", text: "没有本地客户端？也可以直接添加一个网页应用，后续福利卡片可关联它。" });
+    const webBtn = webRow.createEl("button", { text: "＋ 添加网页应用", cls: "mal-button" });
+    webBtn.addEventListener("click", () => {
+      const modal = new Modal(this.app);
+      modal.onOpen = () => {
+        const content = modal.contentEl;
+        content.addClass("mal-compute-modal");
+        content.createEl("h3", { text: "添加网页应用" });
+        const makeField = (label, placeholder) => {
+          content.createDiv({ cls: "mal-mood-label", text: label });
+          return content.createEl("input", { cls: "mal-mood-input", attr: { type: "text", placeholder } });
+        };
+        const nameInput = makeField("应用名称", "例如 ChatGPT 网页版");
+        const urlInput = makeField("官方网站", "https://example.com");
+        const categoryInput = makeField("分类（可选）", "例如 AI助手");
+        const actions = content.createDiv({ cls: "mal-mood-actions" });
+        const save = actions.createEl("button", { text: "添加网页应用", cls: "mod-cta" });
+        save.addEventListener("click", async () => {
+          save.setAttr("disabled", "true");
+          const result = await this.plugin.addWebApp(nameInput.value, urlInput.value, categoryInput.value);
+          if (!result.ok) {
+            new Notice(result.error, 6000);
+            save.removeAttribute("disabled");
+            return;
+          }
+          modal.close();
+          new Notice(result.updated ? `已更新网页入口：${result.app.name}` : `已添加网页应用：${result.app.name}`);
+          this.render();
+        });
+        const cancel = actions.createEl("button", { text: "取消" });
+        cancel.addEventListener("click", () => modal.close());
+      };
+      modal.onClose = () => modal.contentEl.empty();
+      modal.open();
     });
   }
 
@@ -4099,6 +4668,19 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
       }));
 
     new Setting(containerEl)
+      .setName("首页布局")
+      .setDesc("三栏工作区：算力卡册入口 / 常用应用 / 自定义入口卡，三块可拖拽换位。常用应用 + 卡册：顶部最多 8 个常用应用，下方展示完整卡册。")
+      .addDropdown(dd => dd
+        .addOption("classic", "三栏工作区（默认）")
+        .addOption("album", "常用应用 + 卡册")
+        .setValue(this.plugin.settings.homeMode || "classic")
+        .onChange(async v => {
+          this.plugin.settings.homeMode = v === "album" ? "album" : "classic";
+          await this.plugin.saveSettings();
+          this.plugin.refreshViews();
+        }));
+
+    new Setting(containerEl)
       .setName("首页自由布局")
       .setDesc("首页模块（仪表板、笔记绑定、每个分类分区）可拖动换位、拖动右下角调整宽高，布局自动保存。关闭后按内容顺序排列。")
       .addToggle(tg => tg.setValue(this.plugin.settings.homeFreeLayout !== false).onChange(async v => {
@@ -4176,20 +4758,13 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("导入 / 导出配置")
-      .setDesc("导出应用列表、场景与分类为 JSON，可粘贴到其他 Vault 导入；导入会覆盖当前配置。")
+      .setDesc("导出应用资源、场景、分类、算力福利卡片与领取历史为 JSON，可粘贴到其他 Vault 导入；导入会覆盖对应数据。")
       .addButton(btn => btn.setButtonText("导出到剪贴板").onClick(async () => {
         await navigator.clipboard.writeText(this.plugin.exportConfig());
         new Notice("配置已复制到剪贴板");
       }))
       .addButton(btn => btn.setButtonText("导入…").onClick(() => {
         new ImportConfigModal(this.app, this.plugin).open();
-      }));
-
-    new Setting(containerEl)
-      .setName("Bases 数据库视图")
-      .setDesc("生成「应用资料.base」，把应用资料卡接入 Obsidian Bases 数据库（需 Obsidian 1.9+）。")
-      .addButton(btn => btn.setButtonText("生成视图").onClick(() => {
-        this.plugin.createBasesFile();
       }));
 
     // ── 关于 ──
@@ -4209,6 +4784,161 @@ class MacAppLauncherSettingTab extends PluginSettingTab {
 }
 
 module.exports = class MacAppLauncherPlugin extends Plugin {
+  // 配置迁移备份：不覆盖已有 data.json.vN.bak；备份失败必须中止迁移。
+  createMigrationBackup(oldSchemaVersion) {
+    const dataFile = path.join(this.pluginDirPath(), "data.json");
+    if (!fs.existsSync(dataFile)) return "";
+    const startVersion = Math.max(1, Number(oldSchemaVersion) || 1);
+    let version = startVersion;
+    let backupFile = `${dataFile}.v${version}.bak`;
+    while (fs.existsSync(backupFile)) {
+      version += 1;
+      backupFile = `${dataFile}.v${version}.bak`;
+    }
+    fs.copyFileSync(dataFile, backupFile, fs.constants.COPYFILE_EXCL);
+    const sourceSize = fs.statSync(dataFile).size;
+    const backupSize = fs.statSync(backupFile).size;
+    if (sourceSize !== backupSize) {
+      try { fs.unlinkSync(backupFile); } catch (_) {}
+      throw new Error("data.json 备份校验失败，迁移已中止");
+    }
+    console.log(`[Mac App Launcher] 迁移前备份完成：${path.basename(backupFile)}`);
+    return backupFile;
+  }
+
+  // 仅为原始 data.json 中完全缺少 bundleId 字段的应用回填。
+  // 空字符串、null 等已存在值均视为用户已有值，不覆盖。
+  async collectMissingBundleIdUpdates(rawApps, legacyApps = false) {
+    const rawList = Array.isArray(rawApps) ? rawApps : [];
+    const byId = new Map();
+    const byPath = new Map();
+    for (const raw of rawList) {
+      if (!raw || typeof raw !== "object") continue;
+      if (raw.id) byId.set(String(raw.id), raw);
+      if (raw.path) {
+        try { byPath.set(path.resolve(String(raw.path)), raw); } catch (_) {}
+      }
+    }
+    const targets = (this.settings.apps || []).filter(app => {
+      if (!app || !app.path || app.bundleId || !isAppBundleInstalled(app)) return false;
+      if (legacyApps) return true;
+      let raw = byId.get(String(app.id || ""));
+      if (!raw) {
+        try { raw = byPath.get(path.resolve(String(app.path))); } catch (_) {}
+      }
+      // bundleId 的空字符串是旧版 normalizeApp 写入的“未回填”占位，不是用户配置；
+      // 非空已有值绝不覆盖。
+      return !!raw && (!hasOwnField(raw, "bundleId") || raw.bundleId === undefined || raw.bundleId === null || String(raw.bundleId).trim() === "");
+    });
+    const updates = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const app = targets[cursor++];
+        try {
+          const info = await this.readAppInfo(app.path);
+          if (info && info.bundleId) updates.push({ id: app.id, bundleId: info.bundleId });
+        } catch (error) {
+          this.debugLog("[migration] bundleId 回填失败", app.name, String(error && error.message || error));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, Math.max(1, targets.length)) }, worker));
+    return updates;
+  }
+
+  // 统一加载期迁移入口。所有持久化改动先规划、再备份、最后一次 saveSettings。
+  async loadSettings(loaded, rawApps, legacyApps = false) {
+    const oldSchemaVersion = Number(this.settings.schemaVersion) || 0;
+    const oldClaimsSchema = Number(this.settings.computeClaimsSchema) || 0;
+
+    const plannedCards = (this.settings.computeCards || []).map(card => ({ ...card }));
+    // 默认卡合并：作者在 DEFAULT_COMPUTE_CARDS 新增的卡片自动并入用户卡册（跳过用户已删除的 ID）
+    const deletedCardIds = new Set((this.settings.deletedCardIds || []).map(String));
+    const existingCardIds = new Set(plannedCards.map(card => String(card.id)));
+    const addedDefaultCards = [];
+    for (const def of DEFAULT_COMPUTE_CARDS) {
+      const id = String(def.id);
+      if (existingCardIds.has(id) || deletedCardIds.has(id)) continue;
+      addedDefaultCards.push(normalizeComputeCard(def, plannedCards.length + addedDefaultCards.length));
+    }
+    const cardsChanged = addedDefaultCards.length > 0;
+    if (cardsChanged) plannedCards.push(...addedDefaultCards);
+    const linksChanged = migrateComputeCardAppLinks(plannedCards, this.settings.apps || []);
+
+    const rawClaimRecords = Array.isArray(loaded && loaded.computeClaimRecords)
+      ? loaded.computeClaimRecords
+      : [];
+    const plannedRecords = mergeComputeClaimRecords(
+      this.settings.computeClaimRecords || [],
+      this.settings.computeCheckins || {},
+      plannedCards,
+      rawClaimRecords
+    );
+    const recordsChanged = JSON.stringify(plannedRecords) !== JSON.stringify(this.settings.computeClaimRecords || []);
+
+    const bundleUpdates = await this.collectMissingBundleIdUpdates(rawApps, legacyApps);
+
+    const rawLayout = Array.isArray(loaded && loaded.homeLayout) ? loaded.homeLayout : [];
+    const rawLayoutById = new Map(rawLayout.filter(item => item && item.id).map(item => [item.id, item]));
+    const plannedLayout = (this.settings.homeLayout || []).map(item => {
+      const next = { ...item };
+      const raw = rawLayoutById.get(item.id);
+      if (raw && !hasOwnField(raw, "autoHeight")) next.autoHeight = true;
+      if (raw && raw.autoHeight === false && !hasOwnField(raw, "hPx")) {
+        next.hPx = 36 * clampInt(raw.h, 1, 400, 6) - 12;
+      }
+      return next;
+    });
+    const layoutChanged = JSON.stringify(plannedLayout) !== JSON.stringify(this.settings.homeLayout || []);
+
+    const categoryNames = new Set((this.settings.categories || []).map(item => item && item.name));
+    const missingCategories = [...new Set((this.settings.apps || [])
+      .map(app => String(app && app.category || "").trim())
+      .filter(name => name && name !== "未分类" && !categoryNames.has(name)))];
+
+    const migrationNeeded =
+      oldSchemaVersion < SCHEMA_VERSION ||
+      oldClaimsSchema < 2 ||
+      linksChanged ||
+      cardsChanged ||
+      recordsChanged ||
+      bundleUpdates.length > 0 ||
+      layoutChanged ||
+      missingCategories.length > 0;
+
+    if (!migrationNeeded) return false;
+
+    // 备份必须先于所有迁移字段写入；备份失败时抛错，由 onload 中止插件初始化。
+    const backupPath = this.createMigrationBackup(oldSchemaVersion);
+
+    this.settings.computeCards = plannedCards;
+    this.settings.computeClaimRecords = plannedRecords;
+    this.settings.homeLayout = plannedLayout;
+    for (const update of bundleUpdates) {
+      const app = (this.settings.apps || []).find(item => String(item.id) === String(update.id));
+      if (app && (!hasOwnField(app, "bundleId") || app.bundleId === "")) {
+        app.bundleId = update.bundleId;
+      }
+    }
+    for (const name of missingCategories) this.ensureCategoryEntry(name);
+
+    this.settings.computeClaimsSchema = Math.max(oldClaimsSchema, 2);
+    this.settings.schemaVersion = Math.max(oldSchemaVersion, SCHEMA_VERSION);
+    // computeCheckins 是旧版兼容映射，刻意保留；其他用户数据也由 settings 初始化时的 spread 保留。
+    await this.saveSettings();
+
+    console.log("[Mac App Launcher] 配置迁移完成", {
+      schemaVersion: this.settings.schemaVersion,
+      computeClaimsSchema: this.settings.computeClaimsSchema,
+      linkedCards: linksChanged,
+      claimRecordsBefore: (this.settings.computeClaimRecords || []).length,
+      bundleIdsBackfilled: bundleUpdates.length,
+      backup: backupPath || "fresh-install-no-data.json"
+    });
+    return true;
+  }
+
   async onload() {
     // 平台守卫：核心能力全部依赖 macOS（open/plutil/qlmanage/sips），
     // Windows/Linux 桌面端明确提示并停用，而不是静默坏掉
@@ -4217,6 +4947,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       return;
     }
     const loaded = await this.loadData() || {};
+    const legacyApps = !Array.isArray(loaded.apps);
     const rawApps = Array.isArray(loaded.apps) ? loaded.apps : parseLegacyApps(loaded.appsText);
     // token 迁移：明文 → sha256 哈希存储；明文仅在生成的当次会话内可见
     const legacyToken = typeof loaded.agentToken === "string" && loaded.agentToken.length >= 32 ? loaded.agentToken : "";
@@ -4230,14 +4961,17 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       this.sessionAgentToken = crypto.randomBytes(32).toString("hex");
       tokenHash = crypto.createHash("sha256").update(this.sessionAgentToken).digest("hex");
     }
+    // 保留未知/未来版本字段，避免设置对象重建时静默丢弃用户数据；明文旧 token 不再写回。
+    const { agentToken: _legacyAgentToken, ...preservedLoaded } = loaded;
     this.settings = {
+      ...preservedLoaded,
       apps: rawApps.map((app, index) => normalizeApp(app, index)),
       hasScanned: !!loaded.hasScanned,
       agentPort: Number.isInteger(Number(loaded.agentPort)) && Number(loaded.agentPort) > 0 ? Number(loaded.agentPort) : 43171,
       agentTokenHash: tokenHash,
       agentApiEnabled: loaded.agentApiEnabled !== false,
       viewMode: loaded.viewMode === "list" ? "list" : "grid",
-      categories: Array.isArray(loaded.categories) && loaded.categories.length
+      categories: Array.isArray(loaded.categories)
         ? loaded.categories.filter(c => c && c.name).map((c, i) => ({
             name: String(c.name),
             icon: typeof c.icon === "string" ? c.icon : "📁",
@@ -4280,38 +5014,74 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       launchDaily: loaded.launchDaily && typeof loaded.launchDaily === "object" ? loaded.launchDaily : {},
       moodDaily: loaded.moodDaily && typeof loaded.moodDaily === "object" ? loaded.moodDaily : {},
       pinnedOrder: Array.isArray(loaded.pinnedOrder) ? loaded.pinnedOrder : [],
-      // 顶部自定义入口：单个入口，标题 / 副标题 / 图标 / 链接
-      customEntry: (() => {
+      // 左栏快捷入口（2×2）：与右栏同一套结构，最多 4 条
+      leftEntries: (() => {
         const pick = item => item && typeof item === "object"
           ? {
               title: String(item.title || ""),
               sub: String(item.sub || ""),
               emoji: String(item.emoji || ""),
+              iconColor: String(item.iconColor || ""),
+              iconImage: String(item.iconImage || ""),
               url: String(item.url || "")
             }
           : null;
-        const single = pick(loaded.customEntry);
-        if (single) return single;
-        // 兼容多条目版本的配置：取第一条
+        return Array.isArray(loaded.leftEntries) ? loaded.leftEntries.map(pick).filter(Boolean) : [];
+      })(),
+      // 右侧广告位：两行一列，每个只含图片 + 网址链接
+      adSlots: (() => {
+        const pick = item => item && typeof item === "object"
+          ? { image: String(item.image || ""), url: String(item.url || "") }
+          : null;
+        return Array.isArray(loaded.adSlots) ? loaded.adSlots.map(pick).filter(Boolean) : [];
+      })(),
+      // 首页自定义链接：多条，每条标题 / 副标题 / 图标 / 链接，排成两行
+      customEntries: (() => {
+        const pick = item => item && typeof item === "object"
+          ? {
+              title: String(item.title || ""),
+              sub: String(item.sub || ""),
+              emoji: String(item.emoji || ""),
+              iconColor: String(item.iconColor || ""),
+              iconImage: String(item.iconImage || ""),
+              url: String(item.url || "")
+            }
+          : null;
         if (Array.isArray(loaded.customEntries) && loaded.customEntries.length) {
-          const first = pick(loaded.customEntries[0]);
-          if (first) return first;
+          const list = loaded.customEntries.map(pick).filter(Boolean);
+          if (list.length) return list;
         }
-        return { title: "更多白嫖快看【AI信息差】", sub: "点此自定义标题与链接", emoji: "🔥", url: "" };
+        const single = pick(loaded.customEntry);
+        if (single) return [single];
+        return [{ title: "更多白嫖快看【AI信息差】", sub: "点此自定义标题与链接", emoji: "🔥", url: "" }];
       })(),
       // 首页三块工作区顺序：album 算力 / apps 常用应用 / entry 自定义入口
       workspaceOrder: (() => {
-        const keys = ["album", "apps", "entry"];
-        const saved = Array.isArray(loaded.workspaceOrder) ? loaded.workspaceOrder.filter(k => keys.includes(k)) : [];
+        // 三块一排：left 左快捷入口 / apps 常用应用 / entry 右快捷入口
+        const keys = ["left", "apps", "entry"];
+        const saved = Array.isArray(loaded.workspaceOrder)
+          ? loaded.workspaceOrder.filter(k => keys.includes(k))
+          : [];
+        // 旧版配置（含 album、没有 left）统一回落到默认顺序
+        if (!saved.includes("left")) return [...keys];
         for (const key of keys) if (!saved.includes(key)) saved.push(key);
         return saved;
       })(),
-      // 算力打卡卡册：卡面列表 + 每日打卡记录（日期 → 卡 id 数组）
-      computeCards: loaded.computeSchema === 2 && Array.isArray(loaded.computeCards)
-        ? loaded.computeCards
-        : DEFAULT_COMPUTE_CARDS.map(c => ({ ...c })),
+      // 算力卡册：不再因旧版 computeSchema 不匹配而丢弃用户自定义卡片。
+      computeCards: Array.isArray(loaded.computeCards)
+        ? loaded.computeCards.map((card, index) => normalizeComputeCard(card, index))
+        : DEFAULT_COMPUTE_CARDS.map((card, index) => normalizeComputeCard(card, index)),
+      // 用户主动删除的默认卡 ID：作者后续新增默认卡时，跳过这些 ID，避免删除的卡被重新并入。
+      deletedCardIds: Array.isArray(loaded.deletedCardIds) ? loaded.deletedCardIds.map(String) : [],
+      // 旧版日期 → 卡片 ID 映射仅用于一次性迁移和兼容备份；新记录使用独立周期记录。
       computeCheckins: loaded.computeCheckins && typeof loaded.computeCheckins === "object" ? loaded.computeCheckins : {},
-      computeSchema: 2,
+      computeClaimRecords: Array.isArray(loaded.computeClaimRecords)
+        ? loaded.computeClaimRecords.map((record, index) => normalizeClaimRecord(record, index))
+        : [],
+      computeClaimsSchema: Number(loaded.computeClaimsSchema) || 0,
+      computeSchema: 3,
+      // 首页布局模式：classic = 三栏工作区（默认）；album = 常用应用 + 完整卡册
+      homeMode: loaded.homeMode === "album" ? "album" : "classic",
       // 首页自由布局：模块顺序与宽高（12 列网格；autoHeight 未关闭时高度贴合内容）
       homeFreeLayout: loaded.homeFreeLayout !== false,
       homeLayout: Array.isArray(loaded.homeLayout)
@@ -4335,47 +5105,17 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         : [],
       debugLog: loaded.debugLog === true
     };
-    // 首页模块统一高度自适应：旧配置补标记（此前手动调过高度的保留固定像素）
-    {
-      let changed = false;
-      for (const item of this.settings.homeLayout) {
-        if (item.autoHeight === undefined) {
-          item.autoHeight = true;
-          changed = true;
-        }
-        if (item.autoHeight === false && !item.hPx) {
-          item.hPx = 36 * clampInt(item.h, 1, 400, 6) - 12;
-          changed = true;
-        }
-      }
-      if (changed) await this.saveSettings();
-    }
     this.weatherCache = null;
     this.weatherPromise = null;
     this.holidayCache = null;
-    // schemaVersion 版本化迁移：旧配置先备份（data.json.vN.bak）再升级，迁移失败可手动回滚
-    if (this.settings.schemaVersion < SCHEMA_VERSION) {
-      try {
-        const dataFile = path.join(this.pluginDirPath(), "data.json");
-        if (fs.existsSync(dataFile)) {
-          fs.copyFileSync(dataFile, `${dataFile}.v${this.settings.schemaVersion || 1}.bak`);
-          console.log(`[Mac App Launcher] 旧配置已备份：data.json.v${this.settings.schemaVersion || 1}.bak`);
-        }
-      } catch (error) {
-        console.error("[Mac App Launcher] 配置备份失败", error);
-      }
-      // 无论备份是否成功都推进版本号，避免备份失败导致每次启动重复尝试
-      this.settings.schemaVersion = SCHEMA_VERSION;
-    }
-    // 将旧版关键词关联迁移为稳定 appId；仅在唯一匹配时自动关联，避免误绑相似应用。
-    if (migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps)) {
-      await this.saveSettings();
-    }
-    // 补登「应用在用在、但分类表里没有」的分类，排序、拖拽与管理面板才能识别
-    {
-      const before = this.settings.categories.length;
-      for (const app of this.settings.apps) this.ensureCategoryEntry(app.category);
-      if (this.settings.categories.length > before) await this.saveSettings();
+    // 所有字段回填与周期领取记录迁移统一在 loadSettings 中执行。
+    // 迁移前备份 data.json；备份失败则停止加载，避免覆盖用户原始数据。
+    try {
+      await this.loadSettings(loaded, rawApps, legacyApps);
+    } catch (error) {
+      console.error("[Mac App Launcher] 配置迁移失败，已停止插件初始化", error);
+      new Notice(`Mac App Launcher 配置迁移失败，未继续写入数据：${error.message || error}。请检查插件目录中的 data.json 与备份权限。`, 10000);
+      return;
     }
     this.scanning = false;
     this.scanCancelled = false;
@@ -4450,20 +5190,12 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     // 注册场景启动命令
     this.refreshSceneCommands();
     this.debugLog(`插件加载完成 v${this.manifest.version}，应用 ${this.settings.apps.length} 个，场景 ${this.settings.scenes.length} 个`);
-    // 当前笔记切换 / 标签变更时刷新推荐区
-    this.registerEvent(this.app.workspace.on("file-open", () => this.refreshViews()));
-    this.registerEvent(this.app.metadataCache.on("changed", debounce(() => this.refreshViews(), 500)));
     // 笔记内嵌应用启动卡片：```app-launcher 代码块
     this.registerMarkdownCodeBlockProcessor("app-launcher", (source, el) => this.renderLauncherBlock(source, el));
     // 文件列表右键菜单：按类型打开 / 启动绑定场景
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.buildFileMenu(menu, file)));
     // 公开 API：供 QuickAdd / Templater 等插件调用
     this.registerPublicApi();
-    this.addCommand({
-      id: "create-bases-view",
-      name: "生成应用 Bases 数据库视图",
-      callback: () => this.createBasesFile()
-    });
     this.addCommand({
       id: "execute-active-canvas",
       name: "执行当前画布的工作流",
@@ -4715,8 +5447,19 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
   // ---- 配置导入导出：跨 Vault 迁移应用、场景与分类 ----
   exportConfig() {
-    const { apps, scenes, categories, categoryRules, fileRules } = this.settings;
-    return JSON.stringify({ version: this.manifest.version, apps, scenes, categories, categoryRules, fileRules }, null, 2);
+    const {
+      apps, scenes, categories, categoryRules, fileRules,
+      computeCards, computeClaimRecords, computeCheckins
+    } = this.settings;
+    return JSON.stringify({
+      version: this.manifest.version,
+      apps, scenes, categories, categoryRules, fileRules,
+      computeSchema: 3,
+      computeCards,
+      computeClaimRecords,
+      // 保留旧映射仅用于兼容旧版导入器；新版本以 computeClaimRecords 为准。
+      computeCheckins
+    }, null, 2);
   }
 
   async importConfig(text) {
@@ -4756,6 +5499,41 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         appId: String(r.appId)
       }));
     }
+    if (Array.isArray(data.computeCards)) {
+      this.settings.computeCards = data.computeCards.map((card, index) => normalizeComputeCard(card, index));
+      migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps);
+    }
+    const importedLegacyMap = data.computeCheckins && typeof data.computeCheckins === "object" && !Array.isArray(data.computeCheckins)
+      ? data.computeCheckins
+      : this.settings.computeCheckins;
+    if (data.computeCheckins && typeof data.computeCheckins === "object" && !Array.isArray(data.computeCheckins)) {
+      const mergedLegacyMap = { ...(this.settings.computeCheckins || {}) };
+      for (const [day, ids] of Object.entries(data.computeCheckins)) {
+        const existingIds = Array.isArray(mergedLegacyMap[day]) ? mergedLegacyMap[day] : [];
+        mergedLegacyMap[day] = [...new Set([...existingIds, ...(Array.isArray(ids) ? ids : [])])];
+      }
+      this.settings.computeCheckins = mergedLegacyMap;
+    }
+    if (Array.isArray(data.computeClaimRecords)) {
+      const importedRawRecords = data.computeClaimRecords;
+      const importedRecords = importedRawRecords.map((record, index) => normalizeClaimRecord(record, index));
+      this.settings.computeClaimRecords = mergeComputeClaimRecords(
+        importedRecords,
+        importedLegacyMap,
+        this.settings.computeCards,
+        importedRawRecords
+      );
+      this.settings.computeClaimsSchema = 2;
+    } else if (data.computeCheckins && typeof data.computeCheckins === "object" && Array.isArray(data.computeCards)) {
+      this.settings.computeClaimRecords = mergeComputeClaimRecords(
+        [],
+        importedLegacyMap,
+        this.settings.computeCards,
+        []
+      );
+      this.settings.computeClaimsSchema = 2;
+    }
+    this.settings.computeSchema = 3;
     this.settings.hasScanned = true;
     await this.saveSettings();
     this.refreshAppHotkeys();
@@ -4885,35 +5663,6 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     if (failed.length) new Notice(`未能处理：${failed.join("、")}`, 8000);
   }
 
-  // ---- Bases 数据库视图：应用资料卡接入 Obsidian 原生数据库 ----
-  async createBasesFile() {
-    const content = [
-      "filters:",
-      "  and:",
-      '    - type == "application"',
-      "views:",
-      "  - type: table",
-      "    name: 全部应用",
-      "    order:",
-      "      - file.name",
-      "      - app-name",
-      "      - category",
-      "      - status",
-      "  - type: cards",
-      "    name: 应用卡片",
-      ""
-    ].join("\n");
-    const basePath = "应用资料.base";
-    const existing = this.app.vault.getAbstractFileByPath(basePath);
-    if (existing && existing instanceof TFile) {
-      await this.app.vault.modify(existing, content);
-    } else {
-      await this.app.vault.create(basePath, content);
-    }
-    new Notice("已生成「应用资料.base」，在 Bases 中打开即可筛选应用资料卡", 6000);
-    return basePath;
-  }
-
   // ---- 公开 API：供 QuickAdd 宏、Templater 脚本调用 ----
   findAppByQuery(query) {
     const apps = this.settings.apps.filter(a => a.selected);
@@ -4943,6 +5692,10 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   toPublicApp(a) {
     return {
       id: a.id, name: a.name, path: a.path,
+      bundleId: a.bundleId || "",
+      websiteUrl: isSystemAppPath(a.path) ? "" : (a.websiteUrl || ""),
+      installed: isAppBundleInstalled(a),
+      webOnly: isWebOnlyApp(a),
       category: a.category || "未分类",
       pinned: !!a.pinned, custom: !!a.custom,
       launchCount: a.launchCount || 0,
@@ -5534,6 +6287,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       ], { timeout: 5000 });
       const info = JSON.parse(json);
       const name = info.CFBundleDisplayName || info.CFBundleName || path.basename(appPath, ".app");
+      const bundleId = String(info.CFBundleIdentifier || "");
       let iconName = info.CFBundleIconFile || "";
       if (iconName && !iconName.toLowerCase().endsWith(".icns")) iconName += ".icns";
       let iconSource = iconName ? path.join(appPath, "Contents", "Resources", iconName) : "";
@@ -5549,9 +6303,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
         } catch (_) { iconSource = ""; }
       }
       if (iconSource && !fs.existsSync(iconSource)) iconSource = "";
-      return { name, iconSource };
+      return { name, iconSource, bundleId };
     } catch (_) {
-      return { name: path.basename(appPath, ".app"), iconSource: "" };
+      return { name: path.basename(appPath, ".app"), iconSource: "", bundleId: "" };
     }
   }
 
@@ -5575,7 +6329,20 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
 
       const previous = this.settings.apps || [];
       const previousByPath = new Map(previous.map(app => [path.resolve(app.path || ""), app]));
-      const previousByName = new Map(previous.map(app => [(app.name || "").toLowerCase(), app]));
+      const previousByBundle = new Map();
+      const previousByName = new Map();
+      for (const app of previous) {
+        const bundle = String(app.bundleId || "");
+        const name = String(app.name || "").toLowerCase();
+        if (bundle) {
+          if (!previousByBundle.has(bundle)) previousByBundle.set(bundle, []);
+          previousByBundle.get(bundle).push(app);
+        }
+        if (name) {
+          if (!previousByName.has(name)) previousByName.set(name, []);
+          previousByName.get(name).push(app);
+        }
+      }
       const results = [];
       let cursor = 0;
       let completed = 0;
@@ -5586,13 +6353,23 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
           if (index >= paths.length) return;
           const appPath = paths[index];
           const info = await this.readAppInfo(appPath);
-          const old = previousByPath.get(path.resolve(appPath)) || previousByName.get(info.name.toLowerCase());
+          const byBundle = info.bundleId ? (previousByBundle.get(info.bundleId) || []) : [];
+          const byName = previousByName.get(info.name.toLowerCase()) || [];
+          const old = previousByPath.get(path.resolve(appPath)) ||
+            (byBundle.length === 1 ? byBundle[0] : null) ||
+            (byName.length === 1 ? byName[0] : null);
           const suggested = suggestedProfile(info.name, old?.category || fallbackCategory(info.name, appPath));
 
           results.push(normalizeApp({
-            id: appId(appPath),
+            id: old?.id || appId(appPath),
             name: info.name,
             path: appPath,
+            // 用户已有 bundleId 优先保留；只有旧数据缺字段/空值时才采用扫描结果。
+            bundleId: old?.bundleId || info.bundleId || "",
+            websiteUrl: old?.websiteUrl || "",
+            webOnly: false,
+            custom: !!old?.custom,
+            launchMode: old?.launchMode || "smart",
             selected: old ? !!old.selected : false,
             category: old?.category || learnedCategory(info.name, this.settings.categoryRules) || fallbackCategory(info.name, appPath),
             pinned: old?.pinned || false,
@@ -5631,8 +6408,9 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       results.sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
       // 保留手动添加的应用（扫描不到的，如 Parallels、自编译 .app）
       const resultPaths = new Set(results.map(app => path.resolve(app.path || "")));
+      const matchedIds = new Set(results.map(app => app.id));
       const customApps = previous.filter(app =>
-        app.custom && !resultPaths.has(path.resolve(app.path || ""))
+        app.custom && !matchedIds.has(app.id) && !resultPaths.has(path.resolve(app.path || ""))
       );
       this.settings.apps = [...results, ...customApps];
       this.settings.hasScanned = true;
@@ -5814,36 +6592,76 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
   }
 
   launchApp(app, options = {}) {
-    const target = app.path || "";
+    const target = String(app?.path || "");
     const silent = !!options.silent;
-    if (!target) {
-      const message = `缺少应用路径：${app.name}`;
+    const fallbackUrl = options.fallbackUrl || (isSystemAppPath(target) ? "" : (app?.websiteUrl || ""));
+    const recordWebLaunch = () => {
+      if (!app) return { ok: true, mode: "web" };
+      app.launchCount = (app.launchCount || 0) + 1;
+      app.lastLaunchedAt = Date.now();
+      this.recordLaunchDaily();
+      this.saveSettings();
+      this.logLaunchToDaily(app).catch(err => console.warn("[Mac App Launcher] 写入每日笔记失败", err));
+      this.emitPublicEvent("app-launched", {
+        id: app.id, name: app.name, category: app.category || "未分类", mode: "web"
+      });
+      if (!silent) new Notice(`已打开网页入口：${app.name}`);
+      return { ok: true, mode: "web" };
+    };
+    const openWebFallback = () => {
+      if (!fallbackUrl) return null;
+      const opened = openExternalUrl(fallbackUrl);
+      return opened ? recordWebLaunch() : null;
+    };
+
+    if (options.forceWeb) {
+      const webResult = openWebFallback();
+      if (webResult) return Promise.resolve(webResult);
+      const message = `「${app?.name || "应用"}」没有配置有效的官方网站`;
       if (!silent) new Notice(message);
       return Promise.resolve({ ok: false, error: message });
     }
 
-    const args = app.name.toLowerCase() === "finder" ? [os.homedir()] : [target];
+    if (!target || !isAppBundleInstalled(app)) {
+      const webResult = openWebFallback();
+      if (webResult) {
+        if (!silent) new Notice(`本地客户端不可用，已打开 ${app?.name || "应用"} 的网页入口`);
+        return Promise.resolve(webResult);
+      }
+      const message = `本地客户端不可用且没有网页备用入口：${app?.name || "应用"}`;
+      if (!silent) new Notice(message, 7000);
+      return Promise.resolve({ ok: false, error: message });
+    }
+
+    const args = String(app.name || "").toLowerCase() === "finder" ? [os.homedir()] : [target];
     return new Promise(resolve => {
       execFile("/usr/bin/open", args, error => {
         if (error) {
           console.error("[Mac App Launcher] Launch failed", app, error);
+          const webResult = openWebFallback();
+          if (webResult) {
+            if (!silent) new Notice(`客户端启动失败，已切换到 ${app.name} 的网页入口`, 7000);
+            resolve(webResult);
+            return;
+          }
           const message = `启动失败：${app.name}。请检查应用是否仍安装在原位置。`;
           if (!silent) new Notice(message, 7000);
           resolve({ ok: false, error: message });
         } else {
-          // 频率统计：记录启动次数与最近启动时间
+          // 仅成功启动本地客户端时计入应用启动统计；网页回退不混入客户端使用统计。
           app.launchCount = (app.launchCount || 0) + 1;
           app.lastLaunchedAt = Date.now();
           this.recordLaunchDaily();
           this.saveSettings();
           this.logLaunchToDaily(app).catch(err => console.warn("[Mac App Launcher] 写入每日笔记失败", err));
-          this.emitPublicEvent("app-launched", { id: app.id, name: app.name, category: app.category || "未分类" });
+          this.emitPublicEvent("app-launched", { id: app.id, name: app.name, category: app.category || "未分类", mode: "client" });
           if (!silent) new Notice(`已请求启动：${app.name}`);
-          resolve({ ok: true });
+          resolve({ ok: true, mode: "client" });
         }
       });
     });
   }
+
 
   // ---- 每日笔记：记录启动日志（默认关闭）----
   async logLaunchToDaily(app) {
@@ -5882,8 +6700,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     }
   }
 
-  // ---- 当前笔记推荐：根据笔记名、父文件夹与标签匹配应用 ----
-  // 切到应用中心等无文件视图时，沿用最近打开过的笔记
+  // 当前活动笔记上下文：仅供编辑器/终端「打开当前库 / 当前笔记目录」操作使用。
   getActiveNoteFile() {
     const file = this.app.workspace.getActiveFile();
     if (file) {
@@ -5894,125 +6711,6 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       return this.lastNoteFile;
     }
     return null;
-  }
-
-  getNoteRecommendations(limit = 4) {
-    const file = this.getActiveNoteFile();
-    if (!file) return [];
-    const terms = new Set();
-    const addTerm = text => {
-      const t = String(text || "").trim().replace(/^#/, "");
-      if (t.length >= 2) terms.add(t);
-    };
-    const splitWords = text => String(text || "").split(/[\s\-_—–·:：/\\|]+/).forEach(addTerm);
-    addTerm(file.basename);
-    splitWords(file.basename);
-    if (file.parent && file.parent.name) {
-      addTerm(file.parent.name);
-      splitWords(file.parent.name);
-    }
-    const cache = this.app.metadataCache.getFileCache(file);
-    if (cache) {
-      (cache.tags || []).forEach(t => addTerm(t.tag));
-      const fmTags = cache.frontmatter && (cache.frontmatter.tags || cache.frontmatter.tag);
-      if (Array.isArray(fmTags)) fmTags.forEach(addTerm);
-      else if (typeof fmTags === "string") fmTags.split(/[,\s]+/).forEach(addTerm);
-    }
-    if (!terms.size) return [];
-    const apps = this.settings.apps.filter(a => a.selected);
-    const best = new Map();
-    for (const term of terms) {
-      for (const hit of fuzzySearchApps(apps, term)) {
-        const prev = best.get(hit.app);
-        if (!prev || hit.score > prev) best.set(hit.app, hit.score);
-      }
-    }
-    return [...best.entries()]
-      .filter(([, score]) => score >= 2)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([app]) => app);
-  }
-
-  // ---- Frontmatter 应用绑定：读取当前笔记的 apps / app-scene 声明 ----
-  getNoteBindings() {
-    const file = this.getActiveNoteFile();
-    if (!file) return null;
-    const cache = this.app.metadataCache.getFileCache(file);
-    const fm = cache && cache.frontmatter;
-    if (!fm) return null;
-    let appsRaw = fm.apps || fm.app || [];
-    if (typeof appsRaw === "string") appsRaw = [appsRaw];
-    if (!Array.isArray(appsRaw)) appsRaw = [];
-    let scenesRaw = fm["app-scene"] || fm["app-scenes"] || fm.scene || [];
-    if (typeof scenesRaw === "string") scenesRaw = [scenesRaw];
-    if (!Array.isArray(scenesRaw)) scenesRaw = [];
-    if (!appsRaw.length && !scenesRaw.length) return null;
-    const findApp = query => {
-      const q = String(query).toLowerCase();
-      return this.settings.apps.find(a => (a.name || "").toLowerCase() === q) ||
-        this.settings.apps.find(a => (a.name || "").toLowerCase().includes(q)) || null;
-    };
-    return {
-      apps: appsRaw.map(name => ({ name: String(name), app: findApp(name) })),
-      scenes: scenesRaw.map(name => ({
-        name: String(name),
-        scene: this.settings.scenes.find(s => s.name === String(name)) || null
-      }))
-    };
-  }
-
-  // ---- 应用知识库：每个应用一篇资料卡笔记 ----
-  getAppNoteFile(app) {
-    const candidates = [];
-    if (app.notePath) candidates.push(app.notePath);
-    candidates.push(`${APP_NOTES_FOLDER}/${String(app.name).replace(/[\\/:*?"<>|]/g, "-")}.md`);
-    for (const p of candidates) {
-      const f = this.app.vault.getAbstractFileByPath(p);
-      if (f && f instanceof TFile) {
-        // 自愈：兜底命中但 notePath 缺失/过期时回写，关联越用越牢
-        if (app.notePath !== f.path) {
-          app.notePath = f.path;
-          this.saveSettings();
-        }
-        return f;
-      }
-    }
-    return null;
-  }
-
-  async openAppNote(app) {
-    let file = this.getAppNoteFile(app);
-    if (!file) {
-      const name = String(app.name).replace(/[\\/:*?"<>|]/g, "-");
-      const notePath = `${APP_NOTES_FOLDER}/${name}.md`;
-      if (!this.app.vault.getAbstractFileByPath(APP_NOTES_FOLDER)) {
-        await this.app.vault.createFolder(APP_NOTES_FOLDER);
-      }
-      const today = new Date().toISOString().slice(0, 10);
-      const content = `---\ntype: application\napp-name: ${app.name}\ncategory: ${app.category || "未分类"}\nstatus: installed\ncreated: ${today}\n---\n\n\`\`\`app-launcher\napp: ${app.name}\n\`\`\`\n\n## 安装与配置\n\n\n## 使用技巧\n\n\n## 常见故障\n\n\n## 相关笔记\n\n`;
-      file = await this.app.vault.create(notePath, content);
-      app.notePath = notePath;
-      await this.saveSettings();
-      new Notice(`已创建应用笔记：${name}`);
-    }
-    await this.app.workspace.getLeaf(false).openFile(file);
-    return file;
-  }
-
-  // 反向链接：哪些笔记引用了这个应用的资料卡
-  getAppBacklinks(noteFile) {
-    const resolved = this.app.metadataCache.resolvedLinks || {};
-    const out = [];
-    for (const [source, links] of Object.entries(resolved)) {
-      if (source === noteFile.path) continue;
-      if (links && links[noteFile.path]) {
-        const f = this.app.vault.getAbstractFileByPath(source);
-        if (f && f instanceof TFile) out.push(f);
-      }
-    }
-    out.sort((a, b) => a.basename.localeCompare(b.basename, "zh-Hans-CN"));
-    return out;
   }
 
   // ---- 文件列表右键菜单：按文件类型推荐应用打开 / 启动绑定场景 ----
@@ -6051,7 +6749,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     const ext = (file.extension || "").toLowerCase();
     const customRule = (this.settings.fileRules || []).find(r => r.ext === ext);
     const customApp = customRule
-      ? this.settings.apps.find(a => a.id === customRule.appId && a.selected)
+      ? this.settings.apps.find(a => a.id === customRule.appId && a.selected && a.path)
       : null;
     if (customApp) {
       menu.addSeparator();
@@ -6069,7 +6767,7 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     const rule = EXT_CATEGORY_RULES.find(r => r.exts.includes(ext));
     if (!rule) return;
     const candidates = this.settings.apps
-      .filter(a => a.selected && rule.cats.includes(a.category) && (!customApp || a.id !== customApp.id))
+      .filter(a => a.selected && a.path && rule.cats.includes(a.category) && (!customApp || a.id !== customApp.id))
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.launchCount || 0) - (a.launchCount || 0))
       .slice(0, 3);
     if (!candidates.length) return;
@@ -6167,12 +6865,18 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     });
   }
 
-  // 移除手动添加的应用
+  // 移除手动添加的应用。福利卡片保留原 appId，待应用重新添加/扫描后可恢复关联。
   async removeCustomApp(app) {
-    if (!app.custom) return;
+    if (!app.custom) return false;
+    for (const card of this.settings.computeCards || []) {
+      if (String(card.appId || "") !== String(app.id || "")) continue;
+      // 仅复制应用原本已有的官网，不猜测 URL；appId 保留，便于日后恢复关联。
+      if (!card.url && app.websiteUrl && !isSystemAppPath(app.path)) card.url = app.websiteUrl;
+    }
     this.settings.apps = this.settings.apps.filter(item => item.id !== app.id);
     await this.saveSettings();
     this.refreshViews();
+    return true;
   }
 
   // 用 macOS 原生选择面板挑 .app，选完直接拿到路径（取消时返回空串）
@@ -6271,6 +6975,10 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       id: appId(resolved),
       name: info.name,
       path: resolved,
+      bundleId: info.bundleId || "",
+      websiteUrl: "",
+      webOnly: false,
+      launchMode: "smart",
       selected: true,
       category: (category || "").trim() || learnedCategory(info.name, this.settings.categoryRules) || fallbackCategory(info.name, resolved),
       pinned: false,
@@ -6283,10 +6991,68 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       lastLaunchedAt: null
     }, this.settings.apps.length);
     this.settings.apps.push(app);
+    migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps);
     await this.saveSettings();
     this.refreshViews();
     this.buildPinyin([app]);
     return { ok: true, app };
+  }
+
+  // 添加网页应用：作为统一应用资源的一等记录，可被首页和多张福利卡片共享。
+  async addWebApp(name, websiteUrl, category) {
+    const appName = String(name || "").trim();
+    if (!appName) return { ok: false, error: "请输入应用名称" };
+    const safeUrl = normalizeExternalHttpUrl(websiteUrl);
+    if (!safeUrl) return { ok: false, error: "官方网站必须是有效的 http:// 或 https:// 地址" };
+
+    const existing = this.settings.apps.find(app =>
+      String(app.name || "").trim().toLowerCase() === appName.toLowerCase()
+    );
+    if (existing && isSystemAppPath(existing.path)) {
+      return { ok: false, error: `「${existing.name}」是 macOS 系统应用，不能配置为网页应用或添加官方网站入口。` };
+    }
+    if (existing) {
+      const currentUrl = normalizeExternalHttpUrl(existing.websiteUrl || "");
+      if (currentUrl && currentUrl !== safeUrl) {
+        return { ok: false, error: `应用「${existing.name}」已存在且配置了不同的网站入口。请使用不同名称添加，或在应用详情中编辑官方网站。` };
+      }
+      existing.websiteUrl = safeUrl;
+      if (!existing.category || existing.category === "未分类") {
+        existing.category = String(category || "").trim() || "其他";
+      }
+      this.ensureCategoryEntry(existing.category);
+      migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps);
+      await this.saveSettings();
+      this.refreshViews();
+      return { ok: true, app: existing, updated: true };
+    }
+
+    const app = normalizeApp({
+      id: `web-${crypto.randomBytes(8).toString("hex")}`,
+      name: appName,
+      path: "",
+      bundleId: "",
+      websiteUrl: safeUrl,
+      webOnly: true,
+      launchMode: "smart",
+      selected: true,
+      category: String(category || "").trim() || "其他",
+      pinned: false,
+      custom: true,
+      description: "",
+      usage: "",
+      iconPath: "",
+      iconSource: "",
+      launchCount: 0,
+      lastLaunchedAt: null
+    }, this.settings.apps.length);
+    this.settings.apps.push(app);
+    this.ensureCategoryEntry(app.category);
+    migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps);
+    await this.saveSettings();
+    this.refreshViews();
+    this.buildPinyin([app]);
+    return { ok: true, app, updated: false };
   }
 
   // ---- 首页自由布局 ----
