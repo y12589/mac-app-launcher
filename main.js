@@ -6,6 +6,21 @@ const os = require("os");
 const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
+// 打开外部福利页（Electron 环境下走系统浏览器）
+let electronShell = null;
+try { electronShell = require("electron").shell; } catch (e) { /* 非 Electron 环境回退到 window.open */ }
+
+function openExternalUrl(url) {
+  if (!url) return false;
+  try {
+    if (electronShell && typeof electronShell.openExternal === "function") {
+      electronShell.openExternal(url);
+      return true;
+    }
+  } catch (e) { /* 回退 */ }
+  try { window.open(url, "_blank"); } catch (e) { return false; }
+  return true;
+}
 
 const VIEW_TYPE = "mac-app-launcher-view";
 const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）时代
@@ -59,6 +74,36 @@ const DEFAULT_CATEGORY_META = [
   { name: "其他", icon: "📦" }, { name: "未分类", icon: "❓" }
 ];
 const DEFAULT_CATEGORIES = DEFAULT_CATEGORY_META.map(c => c.name);
+
+// 算力打卡卡册：默认卡面（参考 aibotone.com/compute 的福利清单，可在卡册里增删改）
+// cycle: once 一次性 / daily 每日 / monthly 每月；amount 为估值元，仅用于统计
+const DEFAULT_COMPUTE_CARDS = [
+  // 新人礼包（一次性）
+  { id: "aliyun-token", group: "新人礼包", cycle: "once", name: "阿里云 · 1.3 亿 Token", value: "1.3 亿 Token", amount: 450, emoji: "☁️", color: "#fb7185", desc: "通义千问、DeepSeek、GLM、Kimi 等模型 API，适合聊天、推理和代码助手。", url: "https://opc.aliyun.com/products" },
+  { id: "glm-token", group: "新人礼包", cycle: "once", name: "GLM-5.3-Flash · 1 亿 Token", value: "1 亿 Token", amount: 300, emoji: "🧠", color: "#60a5fa", desc: "AI 编程：代码生成、排错和推理，ZCode 邀请权益以活动页为准。", url: "https://zcode.z.ai/", appMatch: "ZCode,智谱" },
+  { id: "workbuddy-2000", group: "新人礼包", cycle: "once", name: "WorkBuddy · 新人 2000 积分", value: "2000 积分", amount: 49, emoji: "🟢", color: "#34d399", desc: "AI 办公：文档、表格与工作流自动化，注册登录后核对新人积分。", url: "https://www.workbuddy.cn/", appMatch: "WorkBuddy" },
+  { id: "workbuddy-intl", group: "新人礼包", cycle: "once", name: "WorkBuddy 国际版 · 350 积分", value: "350 积分", amount: 8, emoji: "🌐", color: "#22d3ee", desc: "AI 办公：文档和浏览器自动化，可选模型以国际版客户端为准。", url: "https://workbuddy.ai/", appMatch: "WorkBuddy" },
+  { id: "siliconflow-16", group: "新人礼包", cycle: "once", name: "硅基流动 · 16 元代金券", value: "16 元通用代金券", amount: 16, emoji: "⚡", color: "#2dd4bf", desc: "模型推理与微调，邀请注册并完成实名认证后双方各得 16 元。", url: "https://cloud.siliconflow.cn/" },
+  { id: "hw-codedao-new", group: "新人礼包", cycle: "once", name: "华为云码道 · 新人礼包", value: "5000 积分", amount: 50, emoji: "☁️", color: "#f59e0b", desc: "AI 编程：代码补全与排错，符合条件的新用户开通个人版可叠加积分。", url: "https://devcloud.cn-north-4.huaweicloud.com/chat" },
+  // 服务器 GPU（一次性）
+  { id: "kaggle-gpu", group: "服务器 GPU", cycle: "once", name: "Kaggle · 免费 GPU 笔记本", value: "双 T4 GPU · 按账号配额", amount: 0, emoji: "🖥️", color: "#6366f1", desc: "模型训练、推理与视频实验，T4 每张 16 GB，GPU 按周限额。", url: "https://www.kaggle.com/code" },
+  { id: "aws-100", group: "服务器 GPU", cycle: "once", name: "AWS · 新用户 100 美元赠金", value: "100 美元赠金", amount: 720, emoji: "🟠", color: "#fb923c", desc: "云服务器：部署网站、数据库和后台任务，GPU 可用性取决于账户权限与配额。", url: "https://aws.amazon.com/free/" },
+  { id: "scnet-trial", group: "服务器 GPU", cycle: "once", name: "国家超算互联网 · 免费算力试用", value: "部分规格可试用", amount: 0, emoji: "🏛️", color: "#94a3b8", desc: "模型训练与 Notebook 推理，算力市场按资源显示试用卡时与库存。", url: "https://www.scnet.cn/ui/mall/" },
+  // 每日福利
+  { id: "workbuddy-daily", group: "每日福利", cycle: "daily", name: "WorkBuddy · Buddy 加油站", value: "每日登录福利", amount: 5, emoji: "🟢", color: "#34d399", desc: "文档、表格和自动化，登录客户端领取当日福利。", url: "https://www.workbuddy.cn/", appMatch: "WorkBuddy" },
+  { id: "trae-daily", group: "每日福利", cycle: "daily", name: "TRAE 每日签到", value: "免费版每日 100 积分", amount: 1, emoji: "🧩", color: "#0ea5e9", desc: "登录 TRAE 后从头像菜单签到，积分有效期 31 个自然日。", url: "https://www.trae.cn/", appMatch: "TRAE" },
+  { id: "qoder-daily", group: "每日福利", cycle: "daily", name: "Qoder CN · 每日领取", value: "每日 100 通用 Credits", amount: 1, emoji: "💻", color: "#a78bfa", desc: "AI 编程、代码库问答，需手动领取。", url: "https://qoder.cn/", appMatch: "Qoder" },
+  { id: "hw-codedao-daily", group: "每日福利", cycle: "daily", name: "华为云码道 · 每日签到", value: "体验版每日 100 积分", amount: 1, emoji: "☁️", color: "#f59e0b", desc: "个人体验版进入「活动福利」领取，当日有效。", url: "https://devcloud.cn-north-4.huaweicloud.com/chat", appMatch: "CodeArts,码道" },
+  { id: "xiaohuanxiong-daily", group: "每日福利", cycle: "daily", name: "商汤小浣熊 · 每日赠送", value: "免费版每日 300 积分", amount: 3, emoji: "🦝", color: "#fb923c", desc: "PPT、数据分析，每天 0 点自动发放，登录后积分有效期延至 7 天。", url: "https://www.xiaohuanxiong.com/", appMatch: "小浣熊" },
+  { id: "qiniu-daily", group: "每日福利", cycle: "daily", name: "七牛云 Conatus · 每日额度", value: "实名用户每日 1 亿 Token", amount: 10, emoji: "🐟", color: "#22d3ee", desc: "图像理解、代码辅助、Agent 工具调用，免费额度仅限 conatus-free。", url: "https://www.qiniu.com/ai/free-models/conatus-2026", appMatch: "七牛" },
+  // 每月福利
+  { id: "trae-monthly", group: "每月福利", cycle: "monthly", name: "TRAE CN · 每月登录赠送", value: "每月 500 积分", amount: 5, emoji: "🧩", color: "#0ea5e9", desc: "代码生成、调试和智能体，按自然月发放。", url: "https://www.trae.cn/" },
+  { id: "workbuddy-monthly", group: "每月福利", cycle: "monthly", name: "WorkBuddy · 体验版月度积分", value: "每月 500 积分", amount: 5, emoji: "🟢", color: "#34d399", desc: "文档、表格和工作流，按套餐周期发放。", url: "https://www.workbuddy.cn/" },
+  { id: "antling-monthly", group: "每月福利", cycle: "monthly", name: "蚂蚁百灵 · 月度抵扣券", value: "每月 10 元 Token 抵扣券", amount: 10, emoji: "🐜", color: "#f472b6", desc: "Ling、Ming 模型 API，每月 1 日发放。", url: "https://www.ant-ling.com/" },
+  { id: "edgeone-monthly", group: "每月福利", cycle: "monthly", name: "EdgeOne Makers · 免费模型额度", value: "每月 50 万 Token", amount: 5, emoji: "🌐", color: "#38bdf8", desc: "模型 API、原型与技术验证，免费版账号共享。", url: "https://pages.edgeone.ai/" },
+  { id: "tencent-adp", group: "每月福利", cycle: "monthly", name: "腾讯云 ADP · 体验版", value: "每月 15,000 PU", amount: 10, emoji: "☁️", color: "#60a5fa", desc: "智能体、知识库与工作流，按平台用量发放。", url: "https://cloud.tencent.com/product/adp" },
+  { id: "elevenlabs-monthly", group: "每月福利", cycle: "monthly", name: "ElevenLabs · 免费语音额度", value: "每月 10,000 Credits", amount: 10, emoji: "🎙️", color: "#a78bfa", desc: "配音、语音转写与音效，按订阅周期发放。", url: "https://elevenlabs.io/app/" }
+];
 
 // 应用资料卡笔记的存放目录
 const APP_NOTES_FOLDER = "应用资料";
@@ -408,7 +453,248 @@ class MalPickerModal extends Modal {
   }
 }
 
-// 场景步骤编辑器：排序、删除、添加四种步骤
+// 月历心情设置：点击日期格弹出，选表情 + 选颜色，可清除、可跳转当日日记
+class MoodModal extends Modal {
+  constructor(app, plugin, date, current) {
+    super(app);
+    this.plugin = plugin;
+    this.date = date;
+    this.current = current || {};
+    this.emoji = current && current.emoji ? current.emoji : "";
+    this.color = current && current.color ? current.color : "";
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-mood-modal");
+    const key = dateKey(this.date);
+    contentEl.createEl("h3", { text: `${key} · 心情` });
+
+    const emojiRow = contentEl.createDiv({ cls: "mal-mood-section" });
+    emojiRow.createDiv({ cls: "mal-mood-label", text: "表情" });
+    const emojiGrid = emojiRow.createDiv({ cls: "mal-mood-emojis" });
+    const EMOJIS = ["😀", "😄", "😊", "🙂", "😐", "😴", "🤯", "😫", "😢", "😡", "🥳", "🤒"];
+    for (const e of EMOJIS) {
+      const item = emojiGrid.createDiv({ cls: "mal-mood-emoji", text: e });
+      if (e === this.emoji) item.addClass("is-selected");
+      item.addEventListener("click", () => {
+        this.emoji = this.emoji === e ? "" : e;
+        emojiGrid.querySelectorAll(".mal-mood-emoji").forEach(el => el.removeClass("is-selected"));
+        if (this.emoji) item.addClass("is-selected");
+      });
+    }
+
+    const colorRow = contentEl.createDiv({ cls: "mal-mood-section" });
+    colorRow.createDiv({ cls: "mal-mood-label", text: "颜色" });
+    const colorGrid = colorRow.createDiv({ cls: "mal-mood-colors" });
+    const COLORS = ["#0ea5e9", "#22d3ee", "#2dd4bf", "#34d399", "#fbbf24", "#fb923c", "#f87171", "#f472b6", "#a78bfa", "#94a3b8"];
+    for (const c of COLORS) {
+      const item = colorGrid.createDiv({ cls: "mal-mood-swatch" });
+      item.style.background = c;
+      item.setAttribute("title", c);
+      if (c.toLowerCase() === String(this.color).toLowerCase()) item.addClass("is-selected");
+      item.addEventListener("click", () => {
+        this.color = this.color.toLowerCase() === c.toLowerCase() ? "" : c;
+        colorGrid.querySelectorAll(".mal-mood-swatch").forEach(el => el.removeClass("is-selected"));
+        if (this.color) item.addClass("is-selected");
+      });
+    }
+
+    const actions = contentEl.createDiv({ cls: "mal-mood-actions" });
+    const saveBtn = actions.createEl("button", { cls: "mod-cta", text: "保存" });
+    saveBtn.addEventListener("click", () => {
+      if (!this.plugin.settings.moodDaily || typeof this.plugin.settings.moodDaily !== "object") this.plugin.settings.moodDaily = {};
+      if (this.emoji || this.color) {
+        this.plugin.settings.moodDaily[key] = { emoji: this.emoji, color: this.color };
+      } else {
+        delete this.plugin.settings.moodDaily[key];
+      }
+      this.plugin.saveSettings();
+      this.close();
+    });
+    const clearBtn = actions.createEl("button", { text: "清除" });
+    clearBtn.addEventListener("click", () => {
+      if (this.plugin.settings.moodDaily) delete this.plugin.settings.moodDaily[key];
+      this.plugin.saveSettings();
+      this.close();
+    });
+    const noteBtn = actions.createEl("button", { text: "打开当日日记" });
+    noteBtn.addEventListener("click", async () => {
+      this.close();
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+        if (leaf.view && typeof leaf.view.openDayNote === "function") {
+          await leaf.view.openDayNote(this.date);
+          return;
+        }
+      }
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// 算力卡面编辑：新增或修改一张卡片
+class ComputeCardModal extends Modal {
+  constructor(app, plugin, card, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.card = card;
+    this.onDone = onDone || (() => {});
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-compute-modal");
+    contentEl.createEl("h3", { text: this.card ? `编辑卡片：${this.card.name}` : "添加卡片" });
+
+    const field = (label, placeholder, value) => {
+      contentEl.createDiv({ cls: "mal-mood-label", text: label });
+      const input = contentEl.createEl("input", { attr: { type: "text", placeholder }, cls: "mal-mood-input" });
+      input.value = value || "";
+      return input;
+    };
+
+    const c = this.card || {};
+    const nameInput = field("名称", "例如 GLM-5.3-Flash · 1 亿 Token", c.name);
+    const valueInput = field("面值文案", "例如 1 亿 Token / 每月 500 积分", c.value);
+    const amountInput = field("估值（元，仅用于统计）", "例如 300", c.amount === undefined ? "" : String(c.amount));
+    const urlInput = field("领取链接（可选）", "https://…", c.url);
+    const matchInput = field("关联应用关键词（可选）", "例如 WorkBuddy / TRAE", c.appMatch);
+    contentEl.createEl("p", {
+      cls: "mal-muted",
+      text: "填了关键词，本地装有对应应用时领取按钮会变成「打开客户端」，直接启动应用；没装则打开上面填的官网链接。"
+    });
+    const groupInput = field("分组", "例如 新人礼包 / 服务器 GPU / 每日福利 / 每月福利", c.group || "自定义");
+    contentEl.createDiv({ cls: "mal-mood-label", text: "说明（可选）" });
+    const descInput = contentEl.createEl("textarea", { cls: "mal-mood-input mal-compute-desc", attr: { rows: "2", placeholder: "一句话说明这个福利怎么用" } });
+    descInput.value = c.desc || "";
+    const emojiInput = field("图标（emoji）", "例如 ⚡", c.emoji);
+
+    contentEl.createDiv({ cls: "mal-mood-label", text: "打卡周期" });
+    const cycleSelect = contentEl.createEl("select", { cls: "dropdown" });
+    for (const [val, label] of [["once", "一次性（只收一次）"], ["daily", "每日（每天可收）"], ["monthly", "每月（每月可收）"]]) {
+      const opt = cycleSelect.createEl("option", { text: label, value: val });
+      if ((c.cycle || "daily") === val) opt.selected = true;
+    }
+
+    contentEl.createDiv({ cls: "mal-mood-label", text: "颜色" });
+    const colorRow = contentEl.createDiv({ cls: "mal-mood-colors" });
+    const COLORS = ["#0ea5e9", "#22d3ee", "#2dd4bf", "#34d399", "#fbbf24", "#fb923c", "#f87171", "#f472b6", "#a78bfa", "#94a3b8"];
+    let color = c.color || COLORS[0];
+    for (const cc of COLORS) {
+      const sw = colorRow.createDiv({ cls: "mal-mood-swatch" });
+      sw.style.background = cc;
+      if (cc === color) sw.addClass("is-selected");
+      sw.addEventListener("click", () => {
+        color = cc;
+        colorRow.querySelectorAll(".mal-mood-swatch").forEach(el => el.removeClass("is-selected"));
+        sw.addClass("is-selected");
+      });
+    }
+
+    const actions = contentEl.createDiv({ cls: "mal-mood-actions" });
+    const save = actions.createEl("button", { cls: "mod-cta", text: "保存" });
+    save.addEventListener("click", async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        new Notice("卡片名称不能为空");
+        return;
+      }
+      const next = {
+        id: c.id || `c${Date.now().toString(36)}`,
+        name,
+        value: valueInput.value.trim(),
+        amount: Number(amountInput.value) || 0,
+        cycle: cycleSelect.value,
+        group: groupInput.value.trim() || "自定义",
+        url: urlInput.value.trim(),
+        appMatch: matchInput.value.trim(),
+        desc: descInput.value.trim(),
+        emoji: emojiInput.value.trim() || "⚡",
+        color
+      };
+      const list = Array.isArray(this.plugin.settings.computeCards) ? this.plugin.settings.computeCards : [];
+      const idx = list.findIndex(x => x.id === next.id);
+      if (idx >= 0) list[idx] = next;
+      else list.push(next);
+      this.plugin.settings.computeCards = list;
+      await this.plugin.saveSettings();
+      this.close();
+      this.onDone();
+    });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// 自定义入口的编辑弹窗：标题 / 副标题 / 图标 / 链接
+class CustomEntryModal extends Modal {
+  constructor(app, plugin, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.onDone = onDone;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "自定义入口" });
+    contentEl.createEl("p", {
+      cls: "mal-muted",
+      text: "显示在首页工作区的入口卡，点它会打开这里的链接。"
+    });
+    const entry = Object.assign({ title: "", sub: "", emoji: "", url: "" }, this.plugin.settings.customEntry || {});
+
+    new Setting(contentEl)
+      .setName("标题")
+      .addText(text => text
+        .setPlaceholder("更多白嫖快看【AI信息差】")
+        .setValue(entry.title)
+        .onChange(value => { entry.title = value; }));
+    new Setting(contentEl)
+      .setName("副标题")
+      .setDesc("可留空，一行小字")
+      .addText(text => text
+        .setPlaceholder("一句话说明")
+        .setValue(entry.sub)
+        .onChange(value => { entry.sub = value; }));
+    new Setting(contentEl)
+      .setName("图标")
+      .setDesc("一个 emoji，可留空")
+      .addText(text => text
+        .setPlaceholder("🔥")
+        .setValue(entry.emoji)
+        .onChange(value => { entry.emoji = value; }));
+    new Setting(contentEl)
+      .setName("链接")
+      .setDesc("点击卡片时打开的网址")
+      .addText(text => text
+        .setPlaceholder("https://")
+        .setValue(entry.url)
+        .onChange(value => { entry.url = value.trim(); }));
+
+    const actions = contentEl.createDiv({ cls: "mal-mood-actions" });
+    const save = actions.createEl("button", { cls: "mod-cta", text: "保存" });
+    save.addEventListener("click", async () => {
+      this.plugin.settings.customEntry = entry;
+      await this.plugin.saveSettings();
+      this.close();
+      this.onDone();
+    });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class SceneStepsModal extends Modal {
   constructor(app, plugin, scene) {
     super(app);
@@ -956,6 +1242,12 @@ class MacAppLauncherView extends ItemView {
         text: "勾选需要展示的软件，设置分类和应用介绍",
         cls: "mal-subtitle"
       });
+    } else if (this.mode === "album") {
+      titleWrap.createEl("h2", { text: "算力打卡卡册", cls: "mal-title" });
+      titleWrap.createEl("div", {
+        text: "点卡片标记今日已领，再点取消；右键可编辑或删除",
+        cls: "mal-subtitle"
+      });
     } else {
       const quote = dailyWorkQuote();
       const line = titleWrap.createDiv({ cls: "mal-quote" });
@@ -997,6 +1289,12 @@ class MacAppLauncherView extends ItemView {
           ? `已选择 ${count} 个应用，在应用中心展示`
           : "还没有选择要展示的应用：在管理应用里点击应用名称或勾选「展示」框", 4000);
       });
+    } else if (this.mode === "album") {
+      const back = controls.createEl("button", { text: "← 返回首页", cls: "mal-button" });
+      back.addEventListener("click", () => {
+        this.mode = "home";
+        this.render();
+      });
     } else {
       const gear = controls.createEl("button", {
         text: "⚙",
@@ -1032,6 +1330,14 @@ class MacAppLauncherView extends ItemView {
         this.render();
       }));
     menu.addSeparator();
+    menu.addItem(item => item
+      .setTitle("算力打卡卡册")
+      .setIcon("zap")
+      .onClick(() => {
+        this.mode = "album";
+        this.searchTerm = "";
+        this.render();
+      }));
     menu.addItem(item => item
       .setTitle("管理应用")
       .setIcon("sliders-horizontal")
@@ -1123,6 +1429,57 @@ class MacAppLauncherView extends ItemView {
     });
     input.value = this.searchTerm;
     input.addEventListener("input", () => this.debouncedSearch(input.value));
+    // 键盘操作：↑↓ 移动高亮，回车启动，Esc 清空
+    input.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        this.moveKbSelection(event.key === "ArrowDown" ? 1 : -1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        this.launchKbSelection();
+      } else if (event.key === "Escape") {
+        input.value = "";
+        this.searchTerm = "";
+        this.kbIndex = -1;
+        this.debouncedSearch("");
+        input.blur();
+      }
+    });
+  }
+
+  // 键盘导航：在当前首页结果里移动高亮
+  kbCards() {
+    if (!this.bodyEl) return [];
+    return Array.from(this.bodyEl.querySelectorAll(".mal-app-card"));
+  }
+
+  moveKbSelection(step) {
+    const cards = this.kbCards();
+    if (!cards.length) return;
+    const current = cards.findIndex(card => card.classList.contains("is-kb-active"));
+    let next = current < 0 ? (step > 0 ? 0 : cards.length - 1) : current + step;
+    if (next < 0) next = cards.length - 1;
+    if (next >= cards.length) next = 0;
+    for (const card of cards) card.removeClass("is-kb-active");
+    this.kbIndex = next;
+    cards[next].addClass("is-kb-active");
+    cards[next].scrollIntoView({ block: "nearest" });
+  }
+
+  launchKbSelection() {
+    const cards = this.kbCards();
+    const active = cards.find(card => card.classList.contains("is-kb-active"));
+    if (!active) {
+      // 没有高亮时回车 = 启动搜索结果里的第一个
+      if (cards.length === 1) cards[0].click();
+      return;
+    }
+    const appId = active.dataset.appId;
+    const app = (this.plugin.settings.apps || []).find(a => a.id === appId);
+    if (!app) return;
+    active.removeClass("is-kb-active");
+    this.kbIndex = -1;
+    this.plugin.launchApp(app);
   }
 
   renderBody(body) {
@@ -1130,88 +1487,653 @@ class MacAppLauncherView extends ItemView {
     body.empty();
     const term = this.searchTerm.trim().toLocaleLowerCase();
     if (this.mode === "manage") this.renderManager(body, term);
+    else if (this.mode === "album") this.renderAlbum(body);
     else this.renderHome(body, term);
   }
 
-  // 首页仪表板：万年历与天气已并入顶部 Hero，这里只保留活跃月历热力图
-  renderDashboard(body) {
-    if (this.plugin.settings.showActivityCalendar === false) return;
-    const board = body.createDiv({ cls: "mal-board" });
-    this.renderActivityCalendar(board);
+  // 首页工作区：三块按 workspaceOrder 排列（album 算力 1/5 / apps 常用应用 / entry 自定义入口 1/5），可拖拽换位
+  renderDashboard(body, selected = []) {
+    const row = body.createDiv({ cls: "mal-workspace" });
+    const order = this.plugin.settings.workspaceOrder || ["album", "apps", "entry"];
+    const colClass = { album: "mal-ws-left", apps: "mal-ws-mid", entry: "mal-ws-entry" };
+    // 列宽跟随模块本身：算力 1fr、常用应用 3fr、入口 1fr，换位后宽度不变
+    const sizeClass = { album: "1fr", apps: "3fr", entry: "1fr" };
+    row.style.gridTemplateColumns = order.map(key => sizeClass[key] || "1fr").join(" ");
+
+    for (const key of order) {
+      const col = row.createDiv({ cls: `mal-ws-col ${colClass[key] || ""}` });
+      col.dataset.ws = key;
+      this.attachWorkspaceDrag(col, key);
+
+      if (key === "album") this.renderAlbumEntry(col);
+      else if (key === "apps") this.renderQuickApps(col, selected);
+      else this.renderCustomEntry(col);
+    }
   }
 
-  // 活跃月历：按天统计应用启动次数，颜色越深越活跃（渲染进仪表板卡片内）
-  renderActivityCalendar(board) {
-    if (!this.calendarCursor) this.calendarCursor = new Date();
-    if (this.calendarYearMode === undefined) this.calendarYearMode = true;
-    const cursor = new Date(this.calendarCursor.getFullYear(), this.calendarCursor.getMonth(), 1);
-    const daily = this.plugin.settings.launchDaily || {};
-
-    const head = board.createDiv({ cls: "mal-cal-head" });
-    head.createDiv({ cls: "mal-cal-title", text: "活跃月历" });
-    const nav = head.createDiv({ cls: "mal-cal-nav" });
-    const toggleBtn = nav.createEl("button", { cls: "mal-cal-mode-btn", text: this.calendarYearMode ? "按月" : "全年" });
-    toggleBtn.addEventListener("click", () => {
-      this.calendarYearMode = !this.calendarYearMode;
+  // 三块工作区拖拽换位：只从角落的握柄发起，避免和内部图标/条目拖拽冲突
+  attachWorkspaceDrag(col, key) {
+    const grip = col.createDiv({ cls: "mal-ws-grip", text: "⠿" });
+    grip.setAttribute("draggable", "true");
+    grip.setAttribute("title", "拖动调整这一块的位置");
+    grip.addEventListener("dragstart", event => {
+      event.dataTransfer.setData("text/x-mal-ws", key);
+      event.dataTransfer.effectAllowed = "move";
+      grip.addClass("is-dragging");
+    });
+    grip.addEventListener("dragend", () => grip.removeClass("is-dragging"));
+    col.addEventListener("dragover", event => {
+      if (!Array.from(event.dataTransfer.types).includes("text/x-mal-ws")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      col.addClass("is-ws-drop");
+    });
+    col.addEventListener("dragleave", () => col.removeClass("is-ws-drop"));
+    col.addEventListener("drop", async event => {
+      col.removeClass("is-ws-drop");
+      const source = event.dataTransfer.getData("text/x-mal-ws");
+      if (!source || source === key) return;
+      event.preventDefault();
+      const order = [...(this.plugin.settings.workspaceOrder || ["album", "apps", "entry"])];
+      const from = order.indexOf(source);
+      if (from < 0) return;
+      order.splice(from, 1);
+      const at = order.indexOf(key);
+      if (at < 0) return;
+      order.splice(at, 0, source);
+      this.plugin.settings.workspaceOrder = order;
+      await this.plugin.saveSettings();
       this.render();
     });
+  }
 
-    if (this.calendarYearMode) {
-      nav.createDiv({ cls: "mal-cal-label", text: "近一年" });
-      const totalEl = this.calLegend(nav);
-      this.renderYearMap(board, daily, totalEl);
+  // 自定义入口：单个入口卡，浅色玻璃底，与其他两块风格一致
+  renderCustomEntry(col) {
+    const entry = this.plugin.settings.customEntry || {};
+    const box = col.createDiv({ cls: "mal-entry-single" });
+    if (entry.emoji) box.createDiv({ cls: "mal-entry-icon", text: entry.emoji });
+    box.createDiv({ cls: "mal-entry-title", text: entry.title || "自定义入口" });
+    const sub = entry.sub || (entry.title ? "" : "点此编辑标题与链接");
+    if (sub) box.createDiv({ cls: "mal-entry-sub", text: sub });
+    box.setAttribute("title", entry.url ? `${entry.title} · ${entry.url}` : "点击编辑自定义入口");
+    box.addEventListener("click", () => {
+      if (entry.url) openExternalUrl(entry.url);
+      else this.openCustomEntryEditor();
+    });
+    box.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      this.openCustomEntryEditor();
+    });
+  }
+
+  openCustomEntryEditor() {
+    new CustomEntryModal(this.app, this.plugin, () => this.render()).open();
+  }
+
+  // 中间栏：按使用频次取常用应用，紧凑图标网格
+  renderQuickApps(col, selected) {
+    const apps = [...selected];
+    // 置顶应用按 pinnedOrder 排（未记录的续在末尾），其余按使用频次补足
+    const pinOrder = this.plugin.settings.pinnedOrder || [];
+    const pinRank = id => {
+      const i = pinOrder.indexOf(id);
+      return i < 0 ? 9999 : i;
+    };
+    const pinnedList = apps.filter(a => a.pinned).sort((a, b) => pinRank(a.id) - pinRank(b.id));
+    const used = apps.filter(a => (a.launchCount || 0) > 0)
+      .sort((a, b) => (b.launchCount || 0) - (a.launchCount || 0) || (b.lastLaunchedAt || 0) - (a.lastLaunchedAt || 0));
+    // 置顶的排前面，其余按使用频次补足
+    const seenIds = new Set(pinnedList.map(a => a.id));
+    const merged = pinnedList.concat(used.filter(a => !seenIds.has(a.id)));
+    const list = merged.length ? merged : apps;
+    const picked = list.slice(0, 24);
+
+    const head = col.createDiv({ cls: "mal-ws-head" });
+    head.createDiv({ cls: "mal-ws-title", text: "常用应用" });
+    head.createDiv({ cls: "mal-ws-sub", text: picked.length ? `${picked.length} 个` : "" });
+
+    const grid = col.createDiv({ cls: "mal-quick-grid" });
+    if (!picked.length) {
+      grid.createEl("p", { cls: "mal-muted", text: "还没有应用" });
+      return;
+    }
+    for (const app of picked) {
+      const el = grid.createDiv({ cls: "mal-quick-app" });
+      const icon = el.createDiv({ cls: "mal-quick-icon" });
+      this.observeIcon(icon, app);
+      el.createDiv({ cls: "mal-quick-name", text: app.name });
+      el.setAttribute("title", `${app.name} · 已启动 ${app.launchCount || 0} 次`);
+      el.addEventListener("click", () => this.plugin.launchApp(app));
+      el.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        this.openAppMenu(app, event);
+      });
+      // 置顶应用可拖拽排序，顺序存进 settings.pinnedOrder
+      if (app.pinned) {
+        el.addClass("is-pinned");
+        el.setAttribute("draggable", "true");
+        el.addEventListener("dragstart", event => {
+          event.dataTransfer.setData("text/plain", app.id);
+          event.dataTransfer.effectAllowed = "move";
+          el.addClass("is-dragging");
+        });
+        el.addEventListener("dragend", () => el.removeClass("is-dragging"));
+        el.addEventListener("dragover", event => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          el.addClass("is-pinned-drop");
+        });
+        el.addEventListener("dragleave", () => el.removeClass("is-pinned-drop"));
+        el.addEventListener("drop", async event => {
+          event.preventDefault();
+          el.removeClass("is-pinned-drop");
+          const sourceId = event.dataTransfer.getData("text/plain");
+          if (!sourceId || sourceId === app.id) return;
+          await this.plugin.movePinnedApp(sourceId, app.id);
+          this.render();
+        });
+      }
+    }
+  }
+
+  // ---- 算力打卡卡册：汇总、入口卡、卡册页与打卡交互 ----
+  // 打卡周期：once 只收一次 / daily 每天可收 / monthly 每月可收
+  computeSummary() {
+    const cards = Array.isArray(this.plugin.settings.computeCards) ? this.plugin.settings.computeCards : [];
+    const checkins = this.plugin.settings.computeCheckins || {};
+    const todayKey = dateKey(new Date());
+    const monthKey = todayKey.slice(0, 7);
+    const cycleOf = card => card.cycle || "daily";
+    const byId = new Map(cards.map(c => [c.id, c]));
+
+    const claimed = new Set();
+    let total = 0;
+    let claimedValue = 0;
+    for (const [day, ids] of Object.entries(checkins)) {
+      if (!Array.isArray(ids)) continue;
+      for (const id of ids) {
+        const card = byId.get(id);
+        if (!card) continue;
+        total += 1;
+        claimedValue += Number(card.amount) || 0;
+        const cycle = cycleOf(card);
+        const inCycle = cycle === "once" || (cycle === "daily" && day === todayKey) || (cycle === "monthly" && day.startsWith(monthKey));
+        if (inCycle) claimed.add(id);
+      }
+    }
+
+    // 最近一次领取日期（用于取消打卡时定位到具体那一天）
+    const lastClaim = card => {
+      let hit = "";
+      for (const [day, ids] of Object.entries(checkins)) {
+        if (Array.isArray(ids) && ids.includes(card.id) && day > hit) hit = day;
+      }
+      return hit;
+    };
+
+    const open = cards.filter(c => !claimed.has(c.id));
+    return {
+      cards,
+      claimed,
+      open,
+      openCount: open.length,
+      openValue: open.reduce((s, c) => s + (Number(c.amount) || 0), 0),
+      doneCount: claimed.size,
+      claimedValue,
+      total,
+      lastClaim
+    };
+  }
+
+  // 与活跃月历并排的卡册入口卡：待领价值 + 收集进度，整卡可点
+  renderAlbumEntry(container) {
+    const s = this.computeSummary();
+    const total = s.cards.length;
+    const card = container.createDiv({ cls: "mal-album-entry" });
+
+    const top = card.createDiv({ cls: "mal-album-entry-top" });
+    top.createSpan({ cls: "mal-album-entry-kicker", text: "算力打卡卡册" });
+    top.createSpan({ cls: "mal-album-entry-badge", text: "⚡" });
+    card.createDiv({ cls: "mal-album-entry-note", text: `累计已领 ¥${s.claimedValue} · 打卡 ${s.total} 次` });
+
+    const mid = card.createDiv({ cls: "mal-album-entry-mid" });
+    mid.createDiv({ cls: "mal-album-entry-value", text: `¥${s.openValue}` });
+    mid.createDiv({ cls: "mal-album-entry-sub", text: `今日可领 · 已收 ${s.doneCount}/${total} 张` });
+
+    const bar = card.createDiv({ cls: "mal-album-entry-bar" });
+    const fill = bar.createDiv({ cls: "mal-album-entry-fill" });
+    fill.style.width = total ? `${Math.max(4, Math.round(s.doneCount / total * 100))}%` : "0";
+
+    card.createDiv({ cls: "mal-album-entry-cta", text: "打开卡册 ›" });
+    card.setAttribute("title", "打开算力打卡卡册");
+    card.addEventListener("click", () => {
+      this.mode = "album";
+      this.render();
+    });
+  }
+
+  // 卡册页：说明条 + 统计卡 + 周期筛选 + 分组卡片
+  renderAlbum(body) {
+    const s = this.computeSummary();
+    const wrap = body.createDiv({ cls: "mal-album" });
+
+    wrap.createDiv({
+      cls: "mal-album-notice",
+      text: "活动由各官方组织运营，与本插件无关；福利可能过期下架或名额有限，领取结果请以平台为准。"
+    });
+
+    const stats = wrap.createDiv({ cls: "mal-album-stats" });
+    const stat = (label, value, sub, accent) => {
+      const box = stats.createDiv({ cls: `mal-album-stat${accent ? " is-accent" : ""}` });
+      box.createDiv({ cls: "mal-album-stat-label", text: label });
+      box.createDiv({ cls: "mal-album-stat-value", text: value });
+      box.createDiv({ cls: "mal-album-stat-sub", text: sub });
+    };
+    stat("今天可领价值", `¥${s.openValue}`, `${s.openCount} 个福利待领`, true);
+    stat("本周期已收", `${s.doneCount} 张`, `卡册共 ${s.cards.length} 张`, false);
+    stat("累计已领价值", `¥${s.claimedValue}`, `共打卡 ${s.total} 次`, false);
+
+    // 全年活跃热力图：从首页移入卡册页，GitHub 风格展示近一年启动记录
+    const heat = wrap.createDiv({ cls: "mal-album-heat" });
+    const heatHead = heat.createDiv({ cls: "mal-cal-head" });
+    const heatMain = heatHead.createDiv({ cls: "mal-cal-head-main" });
+    heatMain.createDiv({ cls: "mal-cal-title", text: "全年活跃" });
+    const daily = this.plugin.settings.launchDaily || {};
+    const todayCount = daily[dateKey(new Date())] || 0;
+    heatMain.createDiv({ cls: "mal-cal-today", text: todayCount ? `今日 ${todayCount} 次` : "今日暂无" });
+    const heatNav = heatHead.createDiv({ cls: "mal-cal-nav" });
+    if (this.hasRecentActivity(daily)) {
+      this.renderYearMap(heat, daily, this.calLegend(heatNav));
+    } else {
+      heatNav.createDiv({ cls: "mal-cal-total", text: "近一年共 0 次" });
+      this.renderYearEmpty(heat);
+    }
+
+    const head = wrap.createDiv({ cls: "mal-album-head" });
+    head.createEl("h3", { text: "我的卡册" });
+    const tools = head.createDiv({ cls: "mal-album-tools" });
+    tools.createSpan({ cls: "mal-album-count", text: `${s.cards.length} 张 · 已收 ${s.doneCount} 张` });
+    const add = tools.createEl("button", { cls: "mal-album-pill is-dark", text: "+ 添加卡片" });
+    add.addEventListener("click", () => {
+      new ComputeCardModal(this.app, this.plugin, null, () => this.render()).open();
+    });
+
+    // 卡册网格：卡片收集进度的可视化，点开看详情
+    const shelf = wrap.createDiv({ cls: "mal-album-shelf" });
+    if (s.cards.length) {
+      for (const card of s.cards) this.renderShelfCard(shelf, card, s);
+    } else {
+      shelf.createEl("p", { cls: "mal-muted", text: "还没有卡片，点「+ 添加卡片」开始收集。" });
+    }
+
+    wrap.createDiv({ cls: "mal-album-divider" });
+
+    // 周期筛选：全部 / 每日 / 每月 / 一次性
+    const filters = [
+      { key: "all", label: "全部" },
+      { key: "daily", label: "每日" },
+      { key: "monthly", label: "每月" },
+      { key: "once", label: "一次性" }
+    ];
+    if (!this.albumFilter) this.albumFilter = "all";
+    const bars = wrap.createDiv({ cls: "mal-album-filters" });
+    for (const f of filters) {
+      const chip = bars.createEl("button", {
+        cls: `mal-nav-chip${this.albumFilter === f.key ? " is-active" : ""}`,
+        text: f.label
+      });
+      chip.addEventListener("click", () => {
+        this.albumFilter = f.key;
+        this.render();
+      });
+    }
+    if (this.albumFilter !== "all") {
+      const hint = bars.createSpan({ cls: "mal-album-filter-hint", text: "点卡片看详情，从详情里可去领取" });
+      hint.setAttribute("aria-hidden", "true");
+    }
+
+    const shown = s.cards.filter(c => this.albumFilter === "all" || (c.cycle || "daily") === this.albumFilter);
+    if (!shown.length) {
+      wrap.createEl("p", { cls: "mal-muted", text: "这个筛选下还没有卡片，点右上角「+ 添加卡片」添加。" });
       return;
     }
 
-    const prevBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "‹", attr: { "aria-label": "上一月" } });
-    const label = nav.createDiv({ cls: "mal-cal-label", text: `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月` });
-    const nextBtn = nav.createEl("button", { cls: "mal-cal-nav-btn", text: "›", attr: { "aria-label": "下一月" } });
-    const goPrev = () => {
-      this.calendarCursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
-      this.render();
-    };
-    const goNext = () => {
-      this.calendarCursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
-      this.render();
-    };
-    prevBtn.addEventListener("click", goPrev);
-    nextBtn.addEventListener("click", goNext);
-
-    const weekRow = board.createDiv({ cls: "mal-cal-weeks" });
-    for (const name of ["一", "二", "三", "四", "五", "六", "日"]) {
-      weekRow.createDiv({ cls: "mal-cal-week-name", text: name });
+    const groups = ["新人礼包", "服务器 GPU", "每日福利", "每月福利"];
+    for (const g of [...groups, ...new Set(shown.map(c => c.group).filter(x => !x || !groups.includes(x)))]) {
+      const items = shown.filter(c => (c.group || "自定义") === (g || "自定义"));
+      if (!items.length) continue;
+      const section = wrap.createDiv({ cls: "mal-album-section" });
+      const themeMap = { "新人礼包": "newbie", "服务器 GPU": "gpu", "每日福利": "daily", "每月福利": "monthly" };
+      const iconMap = { "新人礼包": "🎁", "服务器 GPU": "🖥️", "每日福利": "☀️", "每月福利": "📅" };
+      section.setAttribute("data-theme", themeMap[g] || "custom");
+      const groupHead = section.createDiv({ cls: "mal-album-group-head" });
+      groupHead.createEl("h4", {
+        cls: "mal-album-group",
+        text: `${iconMap[g] ? iconMap[g] + " " : ""}${g || "自定义"}`
+      });
+      const groupDone = items.filter(c => s.claimed.has(c.id)).length;
+      groupHead.createSpan({
+        cls: `mal-album-group-badge${groupDone ? " is-done" : ""}`,
+        text: `${groupDone}/${items.length} 已领`
+      });
+      const grid = section.createDiv({ cls: "mal-album-grid" });
+      for (const card of items) this.renderAlbumCard(grid, card, s);
     }
-
-    const grid = board.createDiv({ cls: "mal-cal-grid" });
-    const year = cursor.getFullYear();
-    const month = cursor.getMonth();
-    const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // 周一为 0
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    grid.style.gridTemplateRows = `repeat(${Math.ceil((firstWeekday + daysInMonth) / 7)}, minmax(0, 1fr))`;
-    const today = new Date();
-    const total = Object.keys(daily).reduce((sum, key) => {
-      const [y, m] = key.split("-").map(Number);
-      return y === year && m === month + 1 ? sum + (daily[key] || 0) : sum;
-    }, 0);
-
-    for (let i = 0; i < firstWeekday; i++) grid.createDiv({ cls: "mal-cal-cell is-empty" });
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month, day);
-      const key = dateKey(date);
-      const count = daily[key] || 0;
-      const cell = grid.createDiv({ cls: "mal-cal-cell" });
-      const isToday = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
-      cell.setText(isToday ? "今日" : String(day));
-      if (count > 0) cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
-      if (isToday) cell.addClass("is-today");
-      const wd = date.getDay();
-      if (wd === 0 || wd === 6) cell.addClass("is-weekend");
-      cell.setAttribute("title", `${key} · ${count ? count + " 次启动" : "无启动记录"}`);
-    }
-
-    const totalEl = this.calLegend(nav);
-    totalEl.setText(`本月共 ${total} 次`);
   }
+
+  // 卡册网格里的单张卡：面值在上、图标居中、名称与状态在下
+  renderShelfCard(grid, card, s) {
+    const claimed = s.claimed.has(card.id);
+    const cycle = card.cycle || "daily";
+    const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
+    const el = grid.createDiv({ cls: `mal-shelf-card${claimed ? " is-claimed" : ""}` });
+
+    const top = el.createDiv({ cls: "mal-shelf-top" });
+    top.createSpan({ cls: "mal-shelf-value", text: card.value || "—" });
+    if (claimed) top.createSpan({ cls: "mal-shelf-dot" });
+
+    const icon = el.createDiv({ cls: "mal-shelf-icon", text: card.emoji || "⚡" });
+    icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 18%, transparent)`;
+
+    el.createDiv({ cls: "mal-shelf-name", text: card.name });
+    el.createDiv({ cls: "mal-shelf-meta", text: `${cycleLabel} · ${claimed ? "已收" : "待收"}` });
+
+    el.setAttribute("title", `${card.name} · ${card.value || ""}${claimed ? " · 已收" : " · 待收"}`);
+    el.addEventListener("click", () => this.openCardDetail(card));
+    el.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      this.openAlbumCardMenu(card, event);
+    });
+  }
+
+  renderAlbumCard(grid, card, s) {
+    const claimed = s.claimed.has(card.id);
+    const cycle = card.cycle || "daily";
+    const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
+    const el = grid.createDiv({ cls: `mal-album-row${claimed ? " is-claimed" : ""}` });
+
+    const icon = el.createDiv({ cls: "mal-album-row-icon", text: card.emoji || "⚡" });
+    icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 16%, transparent)`;
+
+    const body = el.createDiv({ cls: "mal-album-row-body" });
+    body.createDiv({ cls: "mal-album-row-title", text: card.name });
+    if (card.value) body.createDiv({ cls: "mal-album-row-value", text: card.value });
+    if (card.desc) body.createDiv({ cls: "mal-album-row-desc", text: card.desc });
+
+    const meta = body.createDiv({ cls: "mal-album-row-meta" });
+    meta.createSpan({ cls: "mal-album-row-chip", text: `${cycleLabel}领取` });
+    meta.createSpan({
+      cls: `mal-album-row-state${claimed ? " is-done" : ""}`,
+      text: claimed
+        ? (cycle === "once" ? "已收入卡册" : cycle === "daily" ? "今天已领 · 明天再来" : "本月已领 · 下月再来")
+        : (cycle === "once" ? "一次性福利" : cycle === "daily" ? "每日可领一次" : "每月可领一次")
+    });
+    const localApp = this.resolveCardApp(card);
+    if (card.amount) meta.createSpan({ cls: "mal-album-row-chip is-soft", text: `约 ¥${card.amount}` });
+    if (localApp) meta.createSpan({ cls: "mal-album-row-chip is-client", text: `🖥 ${localApp.name}` });
+    const detailLink = meta.createSpan({ cls: "mal-album-row-link", text: "📖 福利详情" });
+    detailLink.addEventListener("click", event => {
+      event.stopPropagation();
+      this.openCardDetail(card);
+    });
+
+    const side = el.createDiv({ cls: "mal-album-row-side" });
+    if (claimed) {
+      const last = s.lastClaim(card);
+      const stamp = side.createDiv({ cls: "mal-album-stamp" });
+      stamp.createDiv({ cls: "mal-album-stamp-main", text: cycle === "daily" ? "今天已领" : "已领取" });
+      if (last) stamp.createDiv({ cls: "mal-album-stamp-date", text: `${Number(last.slice(5, 7))}.${Number(last.slice(8, 10))}` });
+    } else if (localApp || card.url) {
+      if (localApp) {
+        // 装了客户端 → 主按钮（默认启动客户端）+ 下拉箭头（切换模式）
+        const wrap = side.createDiv({ cls: "mal-album-go-wrap" });
+        const mainBtn = wrap.createEl("button", { cls: "mal-album-go is-main", text: "打开客户端" });
+        mainBtn.setAttribute("title", `启动本地应用 ${localApp.name} 并记为已领`);
+        mainBtn.addEventListener("click", async event => {
+          event.stopPropagation();
+          await this.launchOrOpen(card, localApp);
+          await this.checkinCard(card.id);
+          this.render();
+        });
+        const arrow = wrap.createEl("button", { cls: "mal-album-go is-arrow", text: "▾" });
+        arrow.setAttribute("title", "切换启动方式");
+        arrow.addEventListener("click", event => {
+          event.stopPropagation();
+          const menu = new Menu();
+          menu.addItem(item => item
+            .setTitle(`打开客户端 · ${localApp.name}`)
+            .setIcon("play")
+            .onClick(async () => {
+              await this.launchOrOpen(card, localApp);
+              await this.checkinCard(card.id);
+              this.render();
+            }));
+          if (card.url) {
+            menu.addItem(item => item
+              .setTitle("打开网页 ↗")
+              .setIcon("external-link")
+              .onClick(async () => {
+                await this.openUrlOnly(card);
+                await this.checkinCard(card.id);
+                this.render();
+              }));
+          }
+          menu.showAtEvent(event);
+        });
+      } else {
+        // 没装客户端 → 保持单按钮，走网页
+        const go = side.createEl("button", { cls: "mal-album-go", text: "去领取 ↗" });
+        go.addEventListener("click", async event => {
+          event.stopPropagation();
+          await this.launchOrOpen(card, null);
+          await this.checkinCard(card.id);
+          this.render();
+        });
+      }
+    }
+
+    el.setAttribute("title", `${card.name} · ${card.value || ""} · 点开看详情`);
+    el.addEventListener("click", () => this.openCardDetail(card));
+    el.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      this.openAlbumCardMenu(card, event);
+    });
+  }
+
+  // 卡片详情：说明 + 去领取（打开官方页并记录打卡）+ 标记/取消 + 编辑删除
+  openCardDetail(card) {
+    const modal = new Modal(this.app);
+    modal.onOpen = () => {
+      const el = modal.contentEl;
+      el.addClass("mal-compute-detail");
+      const s = this.computeSummary();
+      const claimed = s.claimed.has(card.id);
+      const last = s.lastClaim(card);
+      const cycle = card.cycle || "daily";
+      const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
+
+      const top = el.createDiv({ cls: "mal-compute-detail-top" });
+      const icon = top.createDiv({ cls: "mal-album-card-icon", text: card.emoji || "⚡" });
+      icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 20%, transparent)`;
+      const names = top.createDiv({ cls: "mal-detail-names" });
+      names.createEl("h3", { text: card.name });
+      names.createDiv({
+        cls: "mal-detail-meta",
+        text: `${card.value || "—"}${card.amount ? ` · 约 ¥${card.amount}` : ""} · ${cycleLabel}`
+      });
+
+      if (card.desc) el.createEl("p", { cls: "mal-compute-detail-desc", text: card.desc });
+
+      const localApp = this.resolveCardApp(card);
+      if (localApp) {
+        el.createEl("p", { cls: "mal-compute-detail-desc", text: `已在本地检测到应用「${localApp.name}」，领取时将直接启动它。` });
+      }
+
+      const status = el.createDiv({ cls: `mal-compute-detail-status${claimed ? " is-done" : ""}` });
+      status.setText(claimed
+        ? `本周期已收${last ? ` · ${last}` : ""}`
+        : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
+
+      const actions = el.createDiv({ cls: "mal-mood-actions" });
+      if (localApp || card.url) {
+        if (localApp) {
+          // 装了客户端 → 主按钮（默认启动客户端）+ 箭头下拉
+          const btnWrap = actions.createDiv({ cls: "mal-detail-go-wrap" });
+          const mainBtn = btnWrap.createEl("button", { cls: "mod-cta", text: "打开客户端" });
+          mainBtn.addEventListener("click", async () => {
+            await this.launchOrOpen(card, localApp);
+            if (!claimed) await this.checkinCard(card.id);
+            modal.close();
+            this.render();
+          });
+          const arrow = btnWrap.createEl("button", { cls: "mod-cta is-arrow", text: "▾" });
+          arrow.addEventListener("click", event => {
+            event.stopPropagation();
+            const menu = new Menu();
+            menu.addItem(item => item
+              .setTitle(`打开客户端 · ${localApp.name}`)
+              .setIcon("play")
+              .onClick(async () => {
+                await this.launchOrOpen(card, localApp);
+                if (!claimed) await this.checkinCard(card.id);
+                modal.close();
+                this.render();
+              }));
+            if (card.url) {
+              menu.addItem(item => item
+                .setTitle("打开网页 ↗")
+                .setIcon("external-link")
+                .onClick(async () => {
+                  await this.openUrlOnly(card);
+                  if (!claimed) await this.checkinCard(card.id);
+                  modal.close();
+                  this.render();
+                }));
+            }
+            menu.showAtEvent(event);
+          });
+        } else {
+          const go = actions.createEl("button", { cls: "mod-cta", text: "去领取 ↗" });
+          go.addEventListener("click", async () => {
+            await this.launchOrOpen(card, null);
+            if (!claimed) await this.checkinCard(card.id);
+            modal.close();
+            this.render();
+          });
+        }
+      }
+      if (claimed) {
+        const undo = actions.createEl("button", { text: "取消打卡" });
+        undo.addEventListener("click", async () => {
+          await this.uncheckCard(card);
+          modal.close();
+          this.render();
+        });
+      } else {
+        const mark = actions.createEl("button", { text: "标记已收" });
+        mark.addEventListener("click", async () => {
+          await this.checkinCard(card.id);
+          modal.close();
+          this.render();
+        });
+      }
+      const edit = actions.createEl("button", { text: "编辑" });
+      edit.addEventListener("click", () => {
+        modal.close();
+        new ComputeCardModal(this.app, this.plugin, card, () => this.render()).open();
+      });
+    };
+    modal.onClose = () => modal.contentEl.empty();
+    modal.open();
+  }
+
+  // 卡片 → 本地已安装应用：装了客户端就启动客户端，否则开网页
+  resolveCardApp(card) {
+    const apps = this.plugin.settings.apps || [];
+    if (!apps.length || !card) return null;
+    const raw = String(card.appMatch || card.name || "");
+    const tokens = raw
+      .split(/[·・|/,，、\s]+/)
+      .map(token => token.trim())
+      .filter(token => token.length >= 2)
+      .sort((a, b) => b.length - a.length);
+    for (const token of tokens) {
+      const lower = token.toLowerCase();
+      const exact = apps.find(app => String(app.name || "").toLowerCase() === lower);
+      if (exact) return exact;
+      const partial = apps.find(app => String(app.name || "").toLowerCase().includes(lower));
+      if (partial) return partial;
+    }
+    return null;
+  }
+
+  // 强制走网页入口，忽略本地客户端（给双向切换用）
+  async openUrlOnly(card) {
+    if (card.url) {
+      openExternalUrl(card.url);
+      return true;
+    }
+    new Notice(`「${card.name}」没有官网链接`);
+    return false;
+  }
+
+  // 统一入口：优先启动本地客户端，没有客户端或启动失败才打开官网
+  async launchOrOpen(card, localApp) {
+    const app = localApp || this.resolveCardApp(card);
+    if (app) {
+      const result = await this.plugin.launchApp(app, { silent: true });
+      if (result && result.ok) return true;
+    }
+    if (card.url) {
+      openExternalUrl(card.url);
+      return true;
+    }
+    new Notice(`「${card.name}」既没有本地客户端，也没有官网链接`);
+    return false;
+  }
+
+  async checkinCard(cardId) {
+    const key = dateKey(new Date());
+    const map = this.plugin.settings.computeCheckins || (this.plugin.settings.computeCheckins = {});
+    const list = Array.isArray(map[key]) ? map[key] : [];
+    if (!list.includes(cardId)) map[key] = [...list, cardId];
+    await this.plugin.saveSettings();
+  }
+
+  // 取消：移除该卡最近一次打卡记录
+  async uncheckCard(card) {
+    const s = this.computeSummary();
+    const day = s.lastClaim(card);
+    if (!day) return;
+    const map = this.plugin.settings.computeCheckins || {};
+    const ids = (map[day] || []).filter(id => id !== card.id);
+    if (ids.length) map[day] = ids;
+    else delete map[day];
+    await this.plugin.saveSettings();
+  }
+
+  openAlbumCardMenu(card, event) {
+    const menu = new Menu();
+    if (card.url) {
+      menu.addItem(item => item.setTitle("打开福利页").setIcon("external-link").onClick(() => openExternalUrl(card.url)));
+    }
+    menu.addItem(item => item.setTitle("编辑卡片").setIcon("pencil").onClick(() => {
+      new ComputeCardModal(this.app, this.plugin, card, () => this.render()).open();
+    }));
+    menu.addItem(item => item.setTitle("复制名称").setIcon("copy").onClick(() => {
+      navigator.clipboard.writeText(`${card.name} ${card.value || ""}`.trim());
+      new Notice("已复制卡片信息");
+    }));
+    menu.addSeparator();
+    menu.addItem(item => item.setTitle("删除卡片").setIcon("trash").onClick(async () => {
+      this.plugin.settings.computeCards = (this.plugin.settings.computeCards || []).filter(c => c.id !== card.id);
+      await this.plugin.saveSettings();
+      this.render();
+      new Notice(`已删除卡片：${card.name}`);
+    }));
+    menu.showAtMouseEvent(event);
+  }
+
 
   // 图例 + 总计占位（放在标题行右侧，省出高度给日历网格）
   calLegend(nav) {
@@ -1224,6 +2146,30 @@ class MacAppLauncherView extends ItemView {
   }
 
   // 全年视图：按周成列、周一至周日成行，底部标月份（类似 GitHub 贡献图）
+  // 近一年（53 周）范围内是否有启动或心情记录
+  hasRecentActivity(daily) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const endMonday = new Date(now);
+    endMonday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+    const start = new Date(endMonday);
+    start.setDate(endMonday.getDate() - 52 * 7);
+    const s = dateKey(start);
+    const e = dateKey(now);
+    const mood = this.plugin.settings.moodDaily || {};
+    return Object.keys(daily).some(k => k >= s && k <= e && daily[k] > 0)
+      || Object.keys(mood).some(k => k >= s && k <= e);
+  }
+
+  // 空状态：不画一整块灰格子，给一条可读的引导
+  renderYearEmpty(board) {
+    const box = board.createDiv({ cls: "mal-cal-empty" });
+    box.createDiv({ cls: "mal-cal-empty-icon", text: "🗓" });
+    const text = box.createDiv({ cls: "mal-cal-empty-text" });
+    text.createDiv({ cls: "mal-cal-empty-title", text: "近一年还没有记录" });
+    text.createDiv({ cls: "mal-cal-empty-sub", text: "从应用中心启动任意应用后开始统计" });
+  }
+
   renderYearMap(board, daily, totalEl) {
     const WEEKS = 53;
     const today = new Date();
@@ -1257,14 +2203,50 @@ class MacAppLauncherView extends ItemView {
         const key = dateKey(date);
         const count = daily[key] || 0;
         total += count;
-        if (count > 0) cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
+        const mood = (this.plugin.settings.moodDaily || {})[key];
+        if (mood && mood.color) {
+          cell.style.background = `color-mix(in srgb, ${mood.color} 55%, transparent)`;
+          cell.addClass("has-mood");
+        } else if (count > 0) {
+          cell.addClass(`mal-cal-l${count <= 2 ? 1 : count <= 5 ? 2 : count <= 9 ? 3 : 4}`);
+        }
+        if (mood && mood.emoji) cell.setText(mood.emoji);
         if (date.getTime() === today.getTime()) cell.addClass("is-today");
-        cell.setAttribute("title", `${key} · ${count ? count + " 次启动" : "无启动记录"}`);
+        cell.addClass("is-clickable");
+        cell.addEventListener("click", () => this.openMoodPicker(date));
+        cell.setAttribute("title", `${key} · ${mood && mood.emoji ? "心情 " + mood.emoji + " · " : ""}${count ? count + " 次启动" : "无启动记录"} · 点击设置心情`);
       }
     }
 
     for (const text of labelCells) labels.createDiv({ cls: "mal-cal-year-label", text });
     totalEl.setText(`近一年共 ${total} 次`);
+  }
+
+  // 点击月历日期：打开心情设置弹窗（表情 + 颜色）
+  openMoodPicker(date) {
+    const key = dateKey(date);
+    const current = (this.plugin.settings.moodDaily || {})[key];
+    new MoodModal(this.app, this.plugin, date, current).open();
+  }
+
+  // 点击月历日期：跳转到当日日记（按文件名 YYYY-MM-DD.md 全库匹配，日记类目录优先）
+  async openDayNote(date) {
+    const key = dateKey(date);
+    const KEYWORDS = ["daily", "周期笔记", "日记", "journal", "diary"];
+    const weight = f => {
+      const p = f.path.toLowerCase();
+      const hit = KEYWORDS.some(k => p.includes(k));
+      return hit ? 0 : 1;
+    };
+    const matches = this.app.vault.getMarkdownFiles()
+      .filter(f => f.name === `${key}.md`)
+      .sort((a, b) => weight(a) - weight(b) || a.path.length - b.path.length);
+    if (!matches.length) {
+      new Notice(`${key} 没有找到日记（按文件名 ${key}.md 匹配）`);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(matches[0], { active: true });
   }
 
 
@@ -1387,7 +2369,7 @@ class MacAppLauncherView extends ItemView {
   // 传统顺序排列（搜索状态、或关闭自由布局时使用）
   renderClassicHome(body, selected, filteredSearch, term) {
     if (!term) {
-      this.renderDashboard(body);
+      this.renderDashboard(body, selected);
       this.renderNoteBindings(body);
       this.renderNoteRecommendations(body);
     }
@@ -1403,20 +2385,14 @@ class MacAppLauncherView extends ItemView {
 
     if (this.activeCategory !== "__all__") {
       const categoryApps = filteredSearch.filter(app => app.category === this.activeCategory);
-      const pinned = categoryApps.filter(app => app.pinned);
       const regular = categoryApps.filter(app => !app.pinned);
 
-      // Pinning is a display priority, not a category. Pinned apps remain at
-      // the top of the current view while retaining their original category.
-      if (pinned.length) this.renderAppSection(body, "常用应用", pinned);
+      // 置顶应用统一显示在顶部工作区的「常用应用」里，分类分区里不再重复
       if (regular.length) this.renderAppSection(body, this.activeCategory, regular);
-      if (!pinned.length && !regular.length) {
+      if (!categoryApps.length) {
         body.createEl("p", { text: "这个分类下暂时没有应用。", cls: "mal-empty" });
       }
     } else {
-      const pinned = filteredSearch.filter(app => app.pinned);
-      if (pinned.length) this.renderAppSection(body, "常用应用", pinned);
-
       const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
       const categories = [...new Set(filteredSearch.filter(app => !app.pinned).map(app => app.category || "未分类"))]
         .sort((a, b) => (orderMap.get(a) ?? 999) - (orderMap.get(b) ?? 999) || a.localeCompare(b, "zh-Hans-CN"));
@@ -1432,7 +2408,7 @@ class MacAppLauncherView extends ItemView {
   buildHomeModules(selected, filteredSearch) {
     const defs = [];
     if (this.plugin.settings.showActivityCalendar !== false) {
-      defs.push({ id: "dashboard", w: 12, h: 6, autoHeight: true, render: target => this.renderDashboard(target) });
+      defs.push({ id: "dashboard", w: 12, h: 6, autoHeight: true, render: target => this.renderDashboard(target, selected) });
     }
     if (this.plugin.getNoteBindings()) {
       defs.push({ id: "noteBindings", w: 12, h: 6, autoHeight: true, render: target => this.renderNoteBindings(target) });
@@ -1446,21 +2422,13 @@ class MacAppLauncherView extends ItemView {
 
     if (this.activeCategory !== "__all__") {
       const categoryApps = filteredSearch.filter(app => app.category === this.activeCategory);
-      const pinned = categoryApps.filter(app => app.pinned);
       const regular = categoryApps.filter(app => !app.pinned);
-      if (pinned.length) {
-        defs.push({ id: "pinned", w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, "常用应用", pinned) });
-      }
+      // 置顶应用统一由顶部工作区展示，这里不再单独出卡片
       if (regular.length) {
         const catId = this.activeCategory;
         defs.push({ id: `cat:${catId}`, w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, catId, regular) });
       }
       return defs;
-    }
-
-    const pinned = filteredSearch.filter(app => app.pinned);
-    if (pinned.length) {
-      defs.push({ id: "pinned", w: 12, h: 7, autoHeight: true, render: target => this.renderAppSection(target, "常用应用", pinned) });
     }
 
     const orderMap = new Map(this.plugin.getCategories().map((c, i) => [c.name, i]));
@@ -1721,7 +2689,8 @@ class MacAppLauncherView extends ItemView {
     const section = body.createDiv({ cls: isPinnedStrip ? "mal-pinned-top" : "mal-section" });
     if (title) {
       const icon = iconOverride || this.plugin.categoryIcon(title);
-      section.createEl("h3", { text: `${icon ? icon + " " : ""}${title}`, cls: "mal-category" });
+      const heading = section.createEl("h3", { text: `${icon ? icon + " " : ""}${title}`, cls: "mal-category" });
+      heading.createSpan({ cls: "mal-section-count", text: String(apps.length) });
     }
     const grid = section.createDiv({ cls: `mal-grid ${this.plugin.settings.viewMode === "list" ? "is-list" : ""} ${compact ? "is-compact" : ""}` });
     const sorted = keepOrder ? [...apps] : [...apps].sort((a, b) => {
@@ -1749,6 +2718,7 @@ class MacAppLauncherView extends ItemView {
     const card = document.createElement("div");
     card.className = "mal-app-card";
     card.dataset.tile = `${app.tileW === 2 ? 2 : 1}x${app.tileH === 2 ? 2 : 1}`;
+    card.dataset.appId = app.id;
     card.setAttribute("draggable", "true");
     card.setAttribute("tabindex", "0");
     card.setAttribute("role", "button");
@@ -3213,6 +4183,40 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       showActivityCalendar: loaded.showActivityCalendar !== false,
       weatherCity: typeof loaded.weatherCity === "string" ? loaded.weatherCity : "",
       launchDaily: loaded.launchDaily && typeof loaded.launchDaily === "object" ? loaded.launchDaily : {},
+      moodDaily: loaded.moodDaily && typeof loaded.moodDaily === "object" ? loaded.moodDaily : {},
+      pinnedOrder: Array.isArray(loaded.pinnedOrder) ? loaded.pinnedOrder : [],
+      // 顶部自定义入口：单个入口，标题 / 副标题 / 图标 / 链接
+      customEntry: (() => {
+        const pick = item => item && typeof item === "object"
+          ? {
+              title: String(item.title || ""),
+              sub: String(item.sub || ""),
+              emoji: String(item.emoji || ""),
+              url: String(item.url || "")
+            }
+          : null;
+        const single = pick(loaded.customEntry);
+        if (single) return single;
+        // 兼容多条目版本的配置：取第一条
+        if (Array.isArray(loaded.customEntries) && loaded.customEntries.length) {
+          const first = pick(loaded.customEntries[0]);
+          if (first) return first;
+        }
+        return { title: "更多白嫖快看【AI信息差】", sub: "点此自定义标题与链接", emoji: "🔥", url: "" };
+      })(),
+      // 首页三块工作区顺序：album 算力 / apps 常用应用 / entry 自定义入口
+      workspaceOrder: (() => {
+        const keys = ["album", "apps", "entry"];
+        const saved = Array.isArray(loaded.workspaceOrder) ? loaded.workspaceOrder.filter(k => keys.includes(k)) : [];
+        for (const key of keys) if (!saved.includes(key)) saved.push(key);
+        return saved;
+      })(),
+      // 算力打卡卡册：卡面列表 + 每日打卡记录（日期 → 卡 id 数组）
+      computeCards: loaded.computeSchema === 2 && Array.isArray(loaded.computeCards)
+        ? loaded.computeCards
+        : DEFAULT_COMPUTE_CARDS.map(c => ({ ...c })),
+      computeCheckins: loaded.computeCheckins && typeof loaded.computeCheckins === "object" ? loaded.computeCheckins : {},
+      computeSchema: 2,
       // 首页自由布局：模块顺序与宽高（12 列网格；autoHeight 未关闭时高度贴合内容）
       homeFreeLayout: loaded.homeFreeLayout !== false,
       homeLayout: Array.isArray(loaded.homeLayout)
@@ -3568,6 +4572,22 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
     }
     this.holidayCache = { year, data: null };
     throw new Error("节假日数据获取失败");
+  }
+
+  // ---- 置顶应用拖拽排序：把 source 插到 target 之前，写入 pinnedOrder ----
+  async movePinnedApp(sourceId, targetId) {
+    const apps = this.settings.apps || [];
+    const pinnedApps = apps.filter(a => a.pinned).map(a => a.id);
+    const order = (this.settings.pinnedOrder || []).filter(id => pinnedApps.includes(id));
+    for (const id of pinnedApps) if (!order.includes(id)) order.push(id);
+    const from = order.indexOf(sourceId);
+    if (from < 0) return; // 只接受置顶应用作为拖拽源
+    order.splice(from, 1);
+    const at = order.indexOf(targetId);
+    if (at < 0) return;
+    order.splice(at, 0, sourceId);
+    this.settings.pinnedOrder = order;
+    await this.saveSettings();
   }
 
   // ---- 活跃月历：每次成功启动累加当天次数，只保留最近 400 天 ----
