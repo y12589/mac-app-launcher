@@ -6,20 +6,95 @@ const os = require("os");
 const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
-// 打开外部福利页（Electron 环境下走系统浏览器）
+// 打开外部网页：仅允许 http/https，避免把 file:/javascript:/data: 等协议交给系统打开。
 let electronShell = null;
 try { electronShell = require("electron").shell; } catch (e) { /* 非 Electron 环境回退到 window.open */ }
 
+function normalizeExternalHttpUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  // 兼容用户只填写域名的旧配置；未写协议时默认补 https://。
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href;
+  } catch (e) {
+    return null;
+  }
+}
+
 function openExternalUrl(url) {
-  if (!url) return false;
+  const safeUrl = normalizeExternalHttpUrl(url);
+  if (!safeUrl) {
+    if (url) new Notice("链接无效或协议不受支持，仅允许 http:// 和 https:// 地址");
+    return false;
+  }
   try {
     if (electronShell && typeof electronShell.openExternal === "function") {
-      electronShell.openExternal(url);
+      const pending = electronShell.openExternal(safeUrl);
+      if (pending && typeof pending.catch === "function") {
+        pending.catch(error => {
+          console.error("[Mac App Launcher] Open external URL failed", error);
+          new Notice("无法打开网页，请检查链接或系统浏览器设置");
+        });
+      }
       return true;
     }
-  } catch (e) { /* 回退 */ }
-  try { window.open(url, "_blank"); } catch (e) { return false; }
-  return true;
+  } catch (e) {
+    console.warn("[Mac App Launcher] Electron openExternal failed", e);
+  }
+  try {
+    const opened = window.open(safeUrl, "_blank");
+    if (!opened) {
+      new Notice("浏览器未能打开网页，请检查弹窗设置");
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[Mac App Launcher] window.open failed", e);
+    new Notice("无法打开网页");
+    return false;
+  }
+}
+
+// 福利卡片优先通过稳定 appId 关联本地应用；旧版 appMatch 关键词仅作兼容回退。
+// 关键词必须唯一命中，避免相似应用名称导致启动错误客户端。
+function resolveComputeCardApp(card, apps) {
+  if (!card || !Array.isArray(apps) || !apps.length) return null;
+  if (card.appId) {
+    // 已有稳定 ID 但本机找不到对应应用时，不再猜测其他同名/相似应用。
+    return apps.find(app => String(app.id || "") === String(card.appId)) || null;
+  }
+  const raw = String(card.appMatch || "");
+  const tokens = raw
+    .split(/[·・|/,，、\s]+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 2)
+    .sort((a, b) => b.length - a.length);
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    const exact = apps.filter(app => String(app.name || "").toLowerCase() === lower);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null;
+    const partial = apps.filter(app => String(app.name || "").toLowerCase().includes(lower));
+    if (partial.length === 1) return partial[0];
+    if (partial.length > 1) return null;
+  }
+  return null;
+}
+
+function migrateComputeCardAppLinks(cards, apps) {
+  let changed = false;
+  if (!Array.isArray(cards)) return false;
+  for (const card of cards) {
+    if (!card || card.appId) continue;
+    const app = resolveComputeCardApp(card, apps);
+    if (!app || !app.id) continue;
+    card.appId = app.id;
+    changed = true;
+  }
+  return changed;
 }
 
 const VIEW_TYPE = "mac-app-launcher-view";
@@ -27,6 +102,8 @@ const SCHEMA_VERSION = 2; // 配置结构版本：2 = 场景步骤化（steps）
 
 // 关于页内置更新日志（发版时同步精简版，完整版见 GitHub CHANGELOG）
 const ABOUT_CHANGELOG = [
+  { version: "1.27.1", changes: ["修复：打开客户端或网页不再自动记为已领取，必须由用户手动确认", "卡片列表增加「标记已收」独立操作，详情页打开入口后保留确认按钮", "福利卡片支持关联稳定应用 ID；旧版关键词仅在唯一匹配时迁移，避免误启动相似应用", "外部链接仅允许 http/https，校验福利链接并拒绝不安全协议", "优化卡册福利列表的响应式网格布局"] },
+  { version: "1.27.0", changes: ["算力卡册增加客户端 / 网页双向启动入口，客户端优先并可手动切换", "算力卡册活跃月历迁移到卡册页顶部，首页保留三栏工作区"] },
   { version: "1.26.0", changes: ["首页改为桌面启动器风格：大时钟、日期农历一行、居中搜索框，仪表盘与分类去卡片底", "应用磁贴支持 1×1 / 2×1 / 1×2 / 2×2 四种布局，右键「布局」切换，图标等比放大", "图标右键菜单：编辑 / 更换自定义图标、恢复默认图标、编辑应用主页", "首页各模块（含分类）可自由拖拽换位、拖拽调整宽高，模块高度自适应内容并持久化", "移除「最近启动」模块与卡片右上角置顶星标，分类导航去掉「全部」并整体居中", "细节打磨：分类标题竖条与分隔线、芯片条柔和选中态、悬停浮起与图标投影"] },
   { version: "1.25.1", changes: ["万年历、今日天气、活跃月历改为同一行三列展示，卡片宽度收窄，窗口变窄时自动折行"] },
   { version: "1.25.0", changes: ["首页新增万年历：公历、星期、农历干支生肖、节日，并显示今日上班/休息（按法定节假日与调休安排）", "新增今日天气：简单显示温度与天气，位置可留空自动定位或指定城市，缓存 30 分钟", "新增活跃月历：按天统计应用启动次数的热力图，可前后翻月查看"] },
@@ -560,11 +637,33 @@ class ComputeCardModal extends Modal {
     const nameInput = field("名称", "例如 GLM-5.3-Flash · 1 亿 Token", c.name);
     const valueInput = field("面值文案", "例如 1 亿 Token / 每月 500 积分", c.value);
     const amountInput = field("估值（元，仅用于统计）", "例如 300", c.amount === undefined ? "" : String(c.amount));
-    const urlInput = field("领取链接（可选）", "https://…", c.url);
-    const matchInput = field("关联应用关键词（可选）", "例如 WorkBuddy / TRAE", c.appMatch);
+    const urlInput = field("领取网页（可选）", "https://…", c.url);
+    contentEl.createDiv({ cls: "mal-mood-label", text: "关联本地应用（可选）" });
+    const appSelect = contentEl.createEl("select", { cls: "dropdown" });
+    appSelect.createEl("option", { text: "不关联本地应用（仅使用网页）", value: "" });
+    const localApps = Array.isArray(this.plugin.settings.apps) ? [...this.plugin.settings.apps] : [];
+    localApps.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "zh-CN"));
+    for (const app of localApps) {
+      appSelect.createEl("option", {
+        text: `${app.name}${app.path ? ` · ${path.basename(app.path)}` : ""}`,
+        value: String(app.id || "")
+      });
+    }
+    const linkedApp = resolveComputeCardApp(c, localApps);
+    const staleAppId = c.appId && !linkedApp ? String(c.appId) : "";
+    if (staleAppId) {
+      appSelect.createEl("option", { text: "原关联应用暂未扫描到（保留旧关联）", value: staleAppId });
+      appSelect.value = staleAppId;
+    } else if (linkedApp) {
+      appSelect.value = String(linkedApp.id || "");
+    }
     contentEl.createEl("p", {
       cls: "mal-muted",
-      text: "填了关键词，本地装有对应应用时领取按钮会变成「打开客户端」，直接启动应用；没装则打开上面填的官网链接。"
+      text: staleAppId
+        ? "当前扫描结果中没有原关联应用。可重新扫描或选择其他应用；如暂不调整，旧关联 ID 会保留，启动时不会猜测其他客户端。"
+        : localApps.length
+          ? "关联后，首页应用管理与算力卡册共用同一份本地应用资料。默认优先打开客户端，也可切换到本卡片的领取网页。"
+          : "当前还没有可关联的本地应用。请先扫描或添加应用；旧版关键词关联仍会保留兼容。"
     });
     const groupInput = field("分组", "例如 新人礼包 / 服务器 GPU / 每日福利 / 每月福利", c.group || "自定义");
     contentEl.createDiv({ cls: "mal-mood-label", text: "说明（可选）" });
@@ -602,15 +701,29 @@ class ComputeCardModal extends Modal {
         new Notice("卡片名称不能为空");
         return;
       }
+      const amountRaw = amountInput.value.trim();
+      const amount = amountRaw === "" ? 0 : Number(amountRaw);
+      if (!Number.isFinite(amount) || amount < 0) {
+        new Notice("估值必须是大于或等于 0 的有效数字");
+        return;
+      }
+      const rawUrl = urlInput.value.trim();
+      const safeUrl = normalizeExternalHttpUrl(rawUrl);
+      if (rawUrl && !safeUrl) {
+        new Notice("领取网页必须是有效的 http:// 或 https:// 地址");
+        return;
+      }
       const next = {
         id: c.id || `c${Date.now().toString(36)}`,
         name,
         value: valueInput.value.trim(),
-        amount: Number(amountInput.value) || 0,
+        amount,
         cycle: cycleSelect.value,
         group: groupInput.value.trim() || "自定义",
-        url: urlInput.value.trim(),
-        appMatch: matchInput.value.trim(),
+        url: safeUrl,
+        appId: appSelect.value || "",
+        // 旧版关键词仅在未选择新应用关联时保留，便于兼容旧数据。
+        appMatch: appSelect.value ? "" : String(c.appMatch || ""),
         desc: descInput.value.trim(),
         emoji: emojiInput.value.trim() || "⚡",
         color
@@ -1245,7 +1358,7 @@ class MacAppLauncherView extends ItemView {
     } else if (this.mode === "album") {
       titleWrap.createEl("h2", { text: "算力打卡卡册", cls: "mal-title" });
       titleWrap.createEl("div", {
-        text: "点卡片标记今日已领，再点取消；右键可编辑或删除",
+        text: "打开客户端或网页完成领取，返回后手动标记；右键可编辑或删除",
         cls: "mal-subtitle"
       });
     } else {
@@ -1816,7 +1929,7 @@ class MacAppLauncherView extends ItemView {
         cls: `mal-album-group-badge${groupDone ? " is-done" : ""}`,
         text: `${groupDone}/${items.length} 已领`
       });
-      const grid = section.createDiv({ cls: "mal-album-grid" });
+      const grid = section.createDiv({ cls: "mal-album-list" });
       for (const card of items) this.renderAlbumCard(grid, card, s);
     }
   }
@@ -1883,17 +1996,16 @@ class MacAppLauncherView extends ItemView {
       const stamp = side.createDiv({ cls: "mal-album-stamp" });
       stamp.createDiv({ cls: "mal-album-stamp-main", text: cycle === "daily" ? "今天已领" : "已领取" });
       if (last) stamp.createDiv({ cls: "mal-album-stamp-date", text: `${Number(last.slice(5, 7))}.${Number(last.slice(8, 10))}` });
-    } else if (localApp || card.url) {
+    } else {
       if (localApp) {
-        // 装了客户端 → 主按钮（默认启动客户端）+ 下拉箭头（切换模式）
+        // Smart：默认启动本地客户端；下拉菜单保留网页入口。启动本身不记账。
         const wrap = side.createDiv({ cls: "mal-album-go-wrap" });
         const mainBtn = wrap.createEl("button", { cls: "mal-album-go is-main", text: "打开客户端" });
-        mainBtn.setAttribute("title", `启动本地应用 ${localApp.name} 并记为已领`);
+        mainBtn.setAttribute("title", `打开本地应用 ${localApp.name}；完成领取后需手动标记`);
         mainBtn.addEventListener("click", async event => {
           event.stopPropagation();
-          await this.launchOrOpen(card, localApp);
-          await this.checkinCard(card.id);
-          this.render();
+          const opened = await this.launchOrOpen(card, localApp);
+          if (opened) new Notice("入口已打开。完成实际领取后，返回卡册点击「标记已收」。", 6000);
         });
         const arrow = wrap.createEl("button", { cls: "mal-album-go is-arrow", text: "▾" });
         arrow.setAttribute("title", "切换启动方式");
@@ -1904,32 +2016,38 @@ class MacAppLauncherView extends ItemView {
             .setTitle(`打开客户端 · ${localApp.name}`)
             .setIcon("play")
             .onClick(async () => {
-              await this.launchOrOpen(card, localApp);
-              await this.checkinCard(card.id);
-              this.render();
+              const opened = await this.launchOrOpen(card, localApp);
+              if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
             }));
           if (card.url) {
             menu.addItem(item => item
               .setTitle("打开网页 ↗")
               .setIcon("external-link")
               .onClick(async () => {
-                await this.openUrlOnly(card);
-                await this.checkinCard(card.id);
-                this.render();
+                const opened = await this.openUrlOnly(card);
+                if (opened) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
               }));
           }
           menu.showAtEvent(event);
         });
-      } else {
-        // 没装客户端 → 保持单按钮，走网页
-        const go = side.createEl("button", { cls: "mal-album-go", text: "去领取 ↗" });
+      } else if (card.url) {
+        // 没有匹配到本地客户端时，使用网页入口。
+        const go = side.createEl("button", { cls: "mal-album-go", text: "打开网页 ↗" });
         go.addEventListener("click", async event => {
           event.stopPropagation();
-          await this.launchOrOpen(card, null);
-          await this.checkinCard(card.id);
-          this.render();
+          const opened = await this.launchOrOpen(card, null);
+          if (opened) new Notice("网页入口已打开。完成实际领取后，返回卡册点击「标记已收」。", 6000);
         });
       }
+
+      // 人工确认是唯一写入领取记录的入口；启动客户端/网页不会自动打卡。
+      const mark = side.createEl("button", { cls: "mal-album-confirm", text: "标记已收" });
+      mark.setAttribute("title", "完成实际领取后，手动确认本周期已领取");
+      mark.addEventListener("click", async event => {
+        event.stopPropagation();
+        await this.checkinCard(card.id);
+        this.render();
+      });
     }
 
     el.setAttribute("title", `${card.name} · ${card.value || ""} · 点开看详情`);
@@ -1940,7 +2058,7 @@ class MacAppLauncherView extends ItemView {
     });
   }
 
-  // 卡片详情：说明 + 去领取（打开官方页并记录打卡）+ 标记/取消 + 编辑删除
+  // 卡片详情：说明 + 客户端/网页入口 + 人工标记/取消 + 编辑删除
   openCardDetail(card) {
     const modal = new Modal(this.app);
     modal.onOpen = () => {
@@ -1966,13 +2084,19 @@ class MacAppLauncherView extends ItemView {
 
       const localApp = this.resolveCardApp(card);
       if (localApp) {
-        el.createEl("p", { cls: "mal-compute-detail-desc", text: `已在本地检测到应用「${localApp.name}」，领取时将直接启动它。` });
+        el.createEl("p", { cls: "mal-compute-detail-desc", text: `已关联本地应用「${localApp.name}」。默认优先打开客户端，也可以切换到网页。` });
       }
 
       const status = el.createDiv({ cls: `mal-compute-detail-status${claimed ? " is-done" : ""}` });
       status.setText(claimed
         ? `本周期已收${last ? ` · ${last}` : ""}`
         : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
+      if (!claimed) {
+        el.createEl("p", {
+          cls: "mal-muted",
+          text: "打开客户端或网页不会自动记为已领取。完成实际领取后，请返回这里点击「标记已收」。"
+        });
+      }
 
       const actions = el.createDiv({ cls: "mal-mood-actions" });
       if (localApp || card.url) {
@@ -1981,10 +2105,8 @@ class MacAppLauncherView extends ItemView {
           const btnWrap = actions.createDiv({ cls: "mal-detail-go-wrap" });
           const mainBtn = btnWrap.createEl("button", { cls: "mod-cta", text: "打开客户端" });
           mainBtn.addEventListener("click", async () => {
-            await this.launchOrOpen(card, localApp);
-            if (!claimed) await this.checkinCard(card.id);
-            modal.close();
-            this.render();
+            const opened = await this.launchOrOpen(card, localApp);
+            if (opened && !claimed) new Notice("入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
           });
           const arrow = btnWrap.createEl("button", { cls: "mod-cta is-arrow", text: "▾" });
           arrow.addEventListener("click", event => {
@@ -1994,31 +2116,25 @@ class MacAppLauncherView extends ItemView {
               .setTitle(`打开客户端 · ${localApp.name}`)
               .setIcon("play")
               .onClick(async () => {
-                await this.launchOrOpen(card, localApp);
-                if (!claimed) await this.checkinCard(card.id);
-                modal.close();
-                this.render();
+                const opened = await this.launchOrOpen(card, localApp);
+                if (opened && !claimed) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
               }));
             if (card.url) {
               menu.addItem(item => item
                 .setTitle("打开网页 ↗")
                 .setIcon("external-link")
                 .onClick(async () => {
-                  await this.openUrlOnly(card);
-                  if (!claimed) await this.checkinCard(card.id);
-                  modal.close();
-                  this.render();
+                  const opened = await this.openUrlOnly(card);
+                  if (opened && !claimed) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
                 }));
             }
             menu.showAtEvent(event);
           });
         } else {
-          const go = actions.createEl("button", { cls: "mod-cta", text: "去领取 ↗" });
+          const go = actions.createEl("button", { cls: "mod-cta", text: "打开网页 ↗" });
           go.addEventListener("click", async () => {
-            await this.launchOrOpen(card, null);
-            if (!claimed) await this.checkinCard(card.id);
-            modal.close();
-            this.render();
+            const opened = await this.launchOrOpen(card, null);
+            if (opened && !claimed) new Notice("网页入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
           });
         }
       }
@@ -2049,46 +2165,25 @@ class MacAppLauncherView extends ItemView {
 
   // 卡片 → 本地已安装应用：装了客户端就启动客户端，否则开网页
   resolveCardApp(card) {
-    const apps = this.plugin.settings.apps || [];
-    if (!apps.length || !card) return null;
-    const raw = String(card.appMatch || card.name || "");
-    const tokens = raw
-      .split(/[·・|/,，、\s]+/)
-      .map(token => token.trim())
-      .filter(token => token.length >= 2)
-      .sort((a, b) => b.length - a.length);
-    for (const token of tokens) {
-      const lower = token.toLowerCase();
-      const exact = apps.find(app => String(app.name || "").toLowerCase() === lower);
-      if (exact) return exact;
-      const partial = apps.find(app => String(app.name || "").toLowerCase().includes(lower));
-      if (partial) return partial;
-    }
-    return null;
+    return resolveComputeCardApp(card, this.plugin.settings.apps || []);
   }
 
   // 强制走网页入口，忽略本地客户端（给双向切换用）
   async openUrlOnly(card) {
-    if (card.url) {
-      openExternalUrl(card.url);
-      return true;
-    }
-    new Notice(`「${card.name}」没有官网链接`);
+    if (card.url) return openExternalUrl(card.url);
+    new Notice(`「${card.name}」没有领取网页`);
     return false;
   }
 
-  // 统一入口：优先启动本地客户端，没有客户端或启动失败才打开官网
+  // Smart：优先启动已关联的本地客户端；客户端不可用时回退到本卡片的领取网页。
   async launchOrOpen(card, localApp) {
     const app = localApp || this.resolveCardApp(card);
     if (app) {
       const result = await this.plugin.launchApp(app, { silent: true });
       if (result && result.ok) return true;
     }
-    if (card.url) {
-      openExternalUrl(card.url);
-      return true;
-    }
-    new Notice(`「${card.name}」既没有本地客户端，也没有官网链接`);
+    if (card.url) return openExternalUrl(card.url);
+    new Notice(`「${card.name}」没有可用的本地客户端或领取网页`);
     return false;
   }
 
@@ -4272,6 +4367,10 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       // 无论备份是否成功都推进版本号，避免备份失败导致每次启动重复尝试
       this.settings.schemaVersion = SCHEMA_VERSION;
     }
+    // 将旧版关键词关联迁移为稳定 appId；仅在唯一匹配时自动关联，避免误绑相似应用。
+    if (migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps)) {
+      await this.saveSettings();
+    }
     // 补登「应用在用在、但分类表里没有」的分类，排序、拖拽与管理面板才能识别
     {
       const before = this.settings.categories.length;
@@ -5537,6 +5636,8 @@ module.exports = class MacAppLauncherPlugin extends Plugin {
       );
       this.settings.apps = [...results, ...customApps];
       this.settings.hasScanned = true;
+      // 首次扫描或重扫后，尝试把旧版关键词关联升级为稳定 appId。
+      migrateComputeCardAppLinks(this.settings.computeCards, this.settings.apps);
       await this.saveSettings();
       this.scanStatus = `扫描完成：发现 ${results.length} 个应用`;
       this.debugLog(`扫描完成：${results.length} 个应用，耗时 ${Date.now() - scanStartedAt}ms`);

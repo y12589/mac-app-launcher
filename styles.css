@@ -561,6 +561,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-album-group-badge{padding:2px 9px;border-radius:999px;background:color-mix(in srgb,var(--background-modifier-border) 42%,transparent);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
 .mal-album-group-badge.is-done{background:color-mix(in srgb,#10b981 15%,transparent);color:#059669;font-weight:600}
 
+.mal-album-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:10px}
 .mal-album-row{position:relative;display:flex;align-items:center;gap:13px;padding:13px 15px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 55%,transparent);border-radius:15px;background:color-mix(in srgb,var(--background-primary) 58%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer;transition:transform 120ms ease,box-shadow 120ms ease,border-color 120ms ease}
 .mal-album-row:hover{transform:translateY(-1px);border-color:color-mix(in srgb,#0ea5e9 38%,transparent);box-shadow:0 10px 24px -20px rgba(15,23,42,.45)}
 .mal-album-row.is-claimed{border-color:color-mix(in srgb,#10b981 42%,transparent);background:color-mix(in srgb,#10b981 6%,color-mix(in srgb,var(--background-primary) 58%,transparent))}
@@ -574,10 +575,13 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-album-row-chip.is-soft{background:transparent;color:var(--text-faint)}
 .mal-album-row-state{font-size:10px;color:var(--text-faint);white-space:nowrap}
 .mal-album-row-state.is-done{color:#059669}
-.mal-album-row-side{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;min-width:86px}
+.mal-album-row-side{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap;min-width:190px}
 .mal-album-go{padding:7px 15px;border:0;border-radius:999px;background:linear-gradient(135deg,#38bdf8,#0284c7);color:#fff;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;box-shadow:0 6px 16px -10px rgba(2,132,199,.7);transition:transform 120ms ease,filter 120ms ease}
 .mal-album-go:hover{transform:translateY(-1px);filter:brightness(1.04)}
 .mal-album-go:active{transform:translateY(0);filter:brightness(.97)}
+.mal-album-confirm{padding:7px 11px;border:1px solid color-mix(in srgb,#10b981 42%,var(--background-modifier-border));border-radius:999px;background:color-mix(in srgb,#10b981 8%,var(--background-primary));color:var(--text-normal);font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap;transition:background 120ms ease,border-color 120ms ease,transform 120ms ease}
+.mal-album-confirm:hover{background:color-mix(in srgb,#10b981 15%,var(--background-primary));border-color:color-mix(in srgb,#10b981 65%,var(--background-modifier-border));transform:translateY(-1px)}
+.theme-dark .mal-album-confirm{color:var(--text-normal);border-color:color-mix(in srgb,#34d399 45%,var(--background-modifier-border))}
 
 /* 卡册列表行按钮组：主按钮 + 下拉箭头贴在一起 */
 .mal-album-go-wrap{display:inline-flex;border-radius:999px;overflow:hidden;box-shadow:0 6px 16px -10px rgba(2,132,199,.7)}
@@ -600,7 +604,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .theme-dark .mal-album-stamp::after{border-color:color-mix(in srgb,#34d399 34%,transparent)}
 .theme-dark .mal-album-row-value,.theme-dark .mal-album-row-state.is-done{color:#34d399}
 .theme-dark .mal-album-group-badge.is-done{color:#34d399}
-@media(max-width:640px){.mal-album-row{gap:10px;padding:11px 12px}.mal-album-row-icon{flex-basis:36px;width:36px;height:36px;font-size:18px}.mal-album-row-side{min-width:0}.mal-album-go{padding:6px 11px;font-size:11px}}
+@media(max-width:640px){.mal-album-row{gap:10px;padding:11px 12px;flex-wrap:wrap}.mal-album-row-icon{flex-basis:36px;width:36px;height:36px;font-size:18px}.mal-album-row-body{flex:1 1 calc(100% - 58px)}.mal-album-row-side{width:100%;min-width:0;justify-content:flex-end}.mal-album-go{padding:6px 11px;font-size:11px}.mal-album-confirm{padding:6px 10px;font-size:10.5px}}
 
 /* ===== 分组主题色：新人礼包琥珀 / GPU 蓝 / 每日绿 / 每月紫 ===== */
 .mal-album-section{--alb:#0ea5e9;--alb-2:#0284c7}
