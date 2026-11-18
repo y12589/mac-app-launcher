@@ -72,9 +72,7 @@
 .mal-app-card[data-tile="2x1"] .mal-app-name,.mal-app-card[data-tile="1x2"] .mal-app-name{font-size:12px}
 .mal-app-card[data-tile="2x2"] .mal-app-name{font-size:13px}
 .mal-empty,.mal-muted{color:var(--text-muted)}
-.mal-empty-panel{max-width:520px;margin:50px auto;padding:30px 22px;text-align:center;border:1px dashed var(--background-modifier-border);border-radius:18px}
-.mal-empty-icon{font-size:42px;color:var(--text-muted)}
-.mal-empty-panel p{color:var(--text-muted)}
+
 .mal-progress-panel{margin:10px 0 18px;padding:12px 14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary);color:var(--text-muted);font-size:var(--font-smaller)}
 .mal-progress{display:block;width:100%;height:8px;margin:8px 0}
 .mal-progress-count{text-align:right;font-variant-numeric:tabular-nums}
@@ -217,7 +215,6 @@
 .mal-about-log-entry li{margin:3px 0;color:var(--text-muted);font-size:12.5px;line-height:1.5}
 
 /* 当前笔记推荐区 */
-.mal-note-recs{margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid var(--background-modifier-border)}
 
 /* Markdown app-launcher 启动卡片 */
 .mal-md-block{padding:2px 0}
@@ -232,14 +229,11 @@
 .mal-md-empty{color:var(--text-muted);font-size:var(--font-smaller);padding:6px 2px}
 
 /* 本篇笔记绑定区 */
-.mal-bind-bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+
 .mal-app-card.is-missing{opacity:.55}
 
 /* 应用笔记与反向链接 */
 .mal-detail-note-row{display:flex;gap:8px;align-items:center;margin:0 0 8px}
-.mal-backlinks{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
-.mal-backlink{border:1px solid var(--background-modifier-border);border-radius:999px;padding:4px 10px;background:var(--background-secondary);color:var(--text-muted);font-size:var(--font-smaller)}
-.mal-backlink:hover{border-color:var(--interactive-accent);color:var(--text-normal)}
 
 /* 导入配置弹窗 */
 .mal-import-textarea{width:100%;font-family:var(--font-monospace);font-size:var(--font-smaller);resize:vertical;margin:8px 0 10px}
@@ -273,35 +267,19 @@
 .mal-stats-count{min-width:44px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-muted);font-size:var(--font-smaller)}
 
 /* 首页活跃月历：无卡片底色，直接铺在页面上（万年历与天气已并入顶部 Hero） */
-.mal-board{height:200px;box-sizing:border-box;display:flex;flex-direction:column;margin:0;padding:0;border:0;background:transparent;overflow:hidden}
 
 /* 活跃月历（渲染在仪表板卡片内，铺满整行，高度自适应剩余空间） */
-.mal-cal-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
-.mal-cal-title{font-size:12px;font-weight:650;color:var(--text-normal);white-space:nowrap}
-.mal-cal-head-main{display:flex;align-items:baseline;gap:7px;min-width:0}
-.mal-cal-today{font-size:10.5px;color:var(--text-faint);white-space:nowrap}
-.mal-cal-hint{flex:0 0 auto;margin-top:4px;font-size:10.5px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 /* 空状态：不画灰格子，给一段可读引导 */
-.mal-cal-empty{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;gap:12px;padding:0 8px}
-.mal-cal-empty-icon{font-size:26px;opacity:.6}
-.mal-cal-empty-text{min-width:0}
-.mal-cal-empty-title{font-size:12.5px;font-weight:600;color:var(--text-muted)}
-.mal-cal-empty-sub{margin-top:3px;font-size:11px;line-height:1.5;color:var(--text-faint)}
+
 /* 月历日期可点击：悬停描边提示，点击弹出心情设置 */
-.mal-cal-cell.is-clickable,.mal-cal-year-cell.is-clickable{cursor:pointer}
-.mal-cal-cell.is-clickable:hover,.mal-cal-year-cell.is-clickable:hover{outline:1.5px solid var(--interactive-accent);outline-offset:-1px}
+
 /* 有心情的格子：inline 背景色 + emoji 稍大字号 */
-.mal-cal-cell.has-mood{font-size:calc(var(--font-smaller) + 3px)}
-.mal-cal-year-cell.has-mood{background-image:linear-gradient(45deg,rgba(255,255,255,.18),rgba(255,255,255,0) 55%)}
 
 /* 月历心情弹窗 */
-.mal-mood-modal{max-width:340px}
-.mal-mood-section{margin-bottom:16px}
+
 .mal-mood-label{margin-bottom:7px;font-size:var(--font-smaller);color:var(--text-muted)}
-.mal-mood-emojis{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
-.mal-mood-emoji{display:flex;align-items:center;justify-content:center;height:40px;border:1px solid var(--background-modifier-border);border-radius:10px;font-size:20px;cursor:pointer;background:var(--background-secondary);transition:transform 100ms ease,border-color 100ms ease}
-.mal-mood-emoji:hover{transform:scale(1.08)}
-.mal-mood-emoji.is-selected{border-color:var(--interactive-accent);background:color-mix(in srgb,var(--interactive-accent) 12%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,var(--interactive-accent) 25%,transparent)}
+
 .mal-mood-colors{display:grid;grid-template-columns:repeat(10,1fr);gap:7px}
 .mal-mood-swatch{height:22px;border-radius:7px;cursor:pointer;border:1px solid rgba(0,0,0,.08);transition:transform 100ms ease,box-shadow 100ms ease}
 .mal-mood-swatch:hover{transform:scale(1.12)}
@@ -311,27 +289,10 @@
 
 /* ===== 算力打卡卡册 ===== */
 /* 首页：与活跃月历并排（左月历、右入口卡），窄窗口自动折行 */
-.mal-dash-row{display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;margin:0 0 18px}
-.mal-dash-row>.mal-board{flex:1 1 420px;min-width:0;height:200px;padding:14px 16px;box-sizing:border-box;border:1px solid color-mix(in srgb,var(--background-modifier-border) 62%,transparent);border-radius:16px;background:color-mix(in srgb,var(--background-secondary) 42%,transparent)}
-.mal-album-entry{position:relative;flex:0 0 236px;min-height:200px;display:flex;flex-direction:column;padding:16px 17px;border:1px solid color-mix(in srgb,var(--interactive-accent) 22%,transparent);border-radius:16px;background:linear-gradient(158deg,color-mix(in srgb,var(--interactive-accent) 10%,var(--background-primary)),var(--background-primary) 74%);cursor:pointer;overflow:hidden;transition:transform 130ms ease,box-shadow 130ms ease,border-color 130ms ease}
-.mal-album-entry:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--interactive-accent) 42%,transparent);box-shadow:0 12px 28px -20px rgba(14,165,233,.5)}
-.mal-album-entry-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.mal-album-entry-kicker{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--text-muted)}
-.mal-album-entry-badge{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:color-mix(in srgb,var(--interactive-accent) 15%,transparent);font-size:12px}
-.mal-album-entry-note{margin-top:9px;font-size:10.5px;color:var(--text-faint)}
-.mal-album-entry-mid{margin-top:auto;padding-bottom:2px}
-.mal-album-entry-value{font-size:29px;font-weight:650;line-height:1.1;letter-spacing:-.02em;color:var(--text-normal);font-variant-numeric:tabular-nums}
-.mal-album-entry-sub{margin-top:3px;font-size:10.5px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mal-album-entry-bar{height:5px;margin:9px 0 0;border-radius:999px;background:color-mix(in srgb,var(--background-modifier-border) 70%,transparent);overflow:hidden}
-.mal-album-entry-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,#22d3ee);transition:width 240ms ease}
-.mal-album-entry-cta{margin-top:10px;font-size:11.5px;font-weight:600;color:#0284c7}
-@media(max-width:900px){.mal-album-entry{flex:1 1 100%;min-height:0;padding:14px 16px}
-  .mal-album-entry-mid{margin-top:8px}
-  .mal-album-entry-value{font-size:22px}}
 
 /* 卡册页 */
 .mal-album{max-width:1060px;margin:0 auto}
-.mal-album-notice{padding:8px 13px;border-radius:10px;background:color-mix(in srgb,var(--background-modifier-border) 34%,transparent);color:var(--text-faint);font-size:11px}
+
 /* 顶部福利统计区：淡色渐变容器 + 三张白色统计卡 */
 .mal-album-hero{padding:16px 18px 18px;border:1px solid color-mix(in srgb,#8b5cf6 14%,var(--background-modifier-border));border-radius:18px;background:linear-gradient(135deg,color-mix(in srgb,#8b5cf6 8%,var(--background-primary)),color-mix(in srgb,#0ea5e9 7%,var(--background-primary)) 60%,var(--background-primary));margin:0 0 20px}
 .mal-album-hero-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
@@ -357,69 +318,19 @@
 .mal-album-pill.is-dark:hover{opacity:.86}
 
 /* 周期筛选 */
-.mal-album-filters{display:flex;align-items:center;gap:7px;margin:0 0 14px}
-.mal-album-filter-hint{margin-left:4px;font-size:10.5px;color:var(--text-faint)}
 
 /* 分组 */
-.mal-album-section{margin:0 0 20px}
-.mal-album-group{margin:0 0 9px;font-size:12.5px;font-weight:650;letter-spacing:.02em;color:var(--text-muted)}
 
 /* 卡片网格：未收为虚线灰卡，已收为实线高亮 */
-.mal-album-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(152px,1fr));gap:12px}
-.mal-album-card{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:158px;padding:12px 10px 14px;border:1.5px dashed color-mix(in srgb,var(--background-modifier-border) 95%,transparent);border-radius:14px;background:var(--background-secondary);cursor:pointer;transition:transform 120ms ease,border-color 120ms ease,box-shadow 120ms ease,background 120ms ease}
-.mal-album-card:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--interactive-accent) 50%,transparent);box-shadow:0 8px 22px -14px rgba(0,0,0,.3)}
-.mal-album-card.is-claimed{border-style:solid;border-color:color-mix(in srgb,var(--interactive-accent) 52%,transparent);background:linear-gradient(165deg,color-mix(in srgb,var(--interactive-accent) 10%,transparent),var(--background-secondary) 70%)}
-.mal-album-card-top{position:absolute;top:9px;left:11px;right:9px;display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
-.mal-album-card-value{min-width:0;font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mal-album-card.is-claimed .mal-album-card-value{color:var(--text-normal)}
-.mal-album-card-tag{flex:0 0 auto;padding:1px 5px;border-radius:5px;background:color-mix(in srgb,var(--background-modifier-border) 55%,transparent);font-size:9px;color:var(--text-faint);white-space:nowrap}
-.mal-album-card-tag.is-done{background:color-mix(in srgb,var(--interactive-accent) 14%,transparent);color:#0284c7}
-.mal-album-card-icon{display:flex;align-items:center;justify-content:center;width:46px;height:46px;margin-top:14px;border-radius:13px;font-size:24px;line-height:1}
-.mal-album-card-name{max-width:100%;font-size:12.5px;font-weight:600;color:var(--text-normal);line-height:1.3;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal;overflow:hidden}
-.mal-album-card-tier{font-size:10px;color:var(--text-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
 /* 卡片详情弹窗 */
 .mal-compute-detail{max-width:420px}
-.mal-compute-detail-top{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-.mal-compute-detail-desc{margin:0 0 12px;font-size:var(--font-smaller);color:var(--text-muted);line-height:1.6}
+
 .mal-compute-detail-status{padding:8px 12px;margin-bottom:14px;border-radius:9px;background:color-mix(in srgb,var(--background-modifier-border) 40%,transparent);font-size:var(--font-smaller);color:var(--text-muted)}
 .mal-compute-detail-status.is-done{background:color-mix(in srgb,var(--interactive-accent) 12%,transparent);color:#0284c7}
 .mal-compute-modal{max-width:380px}
 .mal-compute-modal .dropdown{width:100%;margin-bottom:12px}
 .mal-compute-desc{resize:vertical;min-height:52px}
-@media(max-width:820px){.mal-album-entry{margin:0 6px 14px}}
-.mal-cal-nav{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:3px 8px}
-.mal-cal-nav-btn{padding:0 7px;border:0;border-radius:6px;background:transparent;color:var(--text-muted);font-size:15px;line-height:1.4;cursor:pointer}
-.mal-cal-nav-btn:hover{background:var(--background-modifier-hover);color:var(--text-accent)}
-.mal-cal-mode-btn{padding:0 8px;margin-right:4px;border:1px solid var(--background-modifier-border);border-radius:6px;background:var(--background-primary);color:var(--text-muted);font-size:var(--font-smaller);line-height:1.7;cursor:pointer}
-.mal-cal-mode-btn:hover{background:var(--background-modifier-hover);color:var(--text-accent)}
-.mal-cal-label{min-width:86px;text-align:center;font-size:var(--font-smaller);color:var(--text-muted);white-space:nowrap}
-.mal-cal-weeks,.mal-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
-.mal-cal-weeks{flex:0 0 auto;margin-bottom:4px}
-.mal-cal-week-name{padding-bottom:1px;text-align:center;font-size:var(--font-smaller);color:var(--text-faint)}
-.mal-cal-grid{flex:1 1 auto;min-height:0}
-.mal-cal-cell{display:flex;align-items:center;justify-content:center;min-height:0;border-radius:7px;background:color-mix(in srgb,var(--background-modifier-border) 38%,transparent);font-size:var(--font-smaller);color:var(--text-faint);overflow:hidden}
-.mal-cal-cell.is-empty{background:transparent}
-.mal-cal-cell.is-weekend{color:var(--text-faint)}
-.mal-cal-year-wrap{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.mal-cal-year-grid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(53,minmax(0,1fr));grid-template-rows:repeat(7,minmax(0,1fr));grid-auto-flow:column;gap:3px}
-.mal-cal-year-cell{border-radius:3px;background:color-mix(in srgb,var(--background-modifier-border) 55%,transparent);display:flex;align-items:center;justify-content:center;overflow:hidden}
-.mal-cal-year-cell.is-future{background:transparent}
-.mal-cal-year-cell.has-mood{font-size:10px;line-height:1}
-.mal-cal-year-cell.is-today{outline:1px solid var(--interactive-accent);outline-offset:0}
-.mal-cal-year-labels{flex:0 0 auto;display:grid;grid-template-columns:repeat(53,minmax(0,1fr));gap:3px;margin-top:4px}
-.mal-cal-year-label{font-size:10px;color:var(--text-faint);white-space:nowrap}
-.mal-cal-l1{background:color-mix(in srgb,var(--interactive-accent) 18%,transparent);color:var(--text-muted)}
-.mal-cal-l2{background:color-mix(in srgb,var(--interactive-accent) 34%,transparent);color:var(--text-normal)}
-.mal-cal-l3{background:color-mix(in srgb,var(--interactive-accent) 50%,transparent);color:var(--text-normal)}
-.mal-cal-l4{background:color-mix(in srgb,var(--interactive-accent) 66%,transparent);color:var(--text-normal)}
-.mal-cal-cell.is-today{background:var(--interactive-accent);color:var(--text-on-accent);font-weight:650}
-.mal-cal-legend{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-faint)}
-.mal-cal-swatch{width:9px;height:9px;border-radius:2px}
-.mal-cal-swatch.is-on{background:color-mix(in srgb,var(--interactive-accent) 34%,transparent)}
-.mal-cal-swatch.is-off{background:color-mix(in srgb,var(--background-modifier-border) 55%,transparent)}
-.mal-cal-total{font-size:var(--font-smaller);color:var(--text-faint);white-space:nowrap}
-@media(max-width:600px){.mal-cal-weeks,.mal-cal-grid{gap:4px}}
 
 /* 首页自由布局：12 列网格，模块宽度可拖、高度默认贴合内容（行高 auto） */
 .mal-home-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:auto;gap:12px;align-items:start;margin:0 0 16px}
@@ -428,8 +339,8 @@
 .mal-mod-content::-webkit-scrollbar{width:6px;height:6px}
 .mal-mod-content::-webkit-scrollbar-thumb{border-radius:3px;background:color-mix(in srgb,var(--text-faint) 30%,transparent)}
 .mal-mod-content::-webkit-scrollbar-track{background:transparent}
-.mal-mod-content>.mal-board{height:200px;margin:0}
-.mal-mod-content>.mal-section,.mal-mod-content>.mal-pinned-top,.mal-mod-content>.mal-note-recs,.mal-mod-content>.mal-category-nav{margin:0;padding:0;border:0}
+
+.mal-mod-content>.mal-section,.mal-mod-content>.mal-pinned-top,.mal-mod-content>.mal-category-nav{margin:0;padding:0;border:0}
 .mal-mod-content .mal-category{margin:0 0 6px}
 .mal-mod-content .mal-grid{gap:10px}
 .mal-mod:hover{outline:1px dashed var(--background-modifier-border);outline-offset:-1px}
@@ -480,11 +391,6 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-app-card:hover .mal-app-name{color:var(--text-normal)}
 
 /* 活跃月历：格子圆角更柔和，图例收敛 */
-.mal-cal-cell,.mal-cal-year-cell{border-radius:2.5px}
-.mal-cal-mode-btn{border-radius:7px;transition:background 130ms ease,color 130ms ease}
-.mal-cal-title{letter-spacing:.04em}
-.mal-cal-total,.mal-cal-l{letter-spacing:.02em}
-
 
 /* ===== 动态背景与色彩：冷色调极光，清爽干净 ===== */
 .mal-view{isolation:isolate}
@@ -530,9 +436,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-hero-search:focus-within{border-color:color-mix(in srgb,#0ea5e9 42%,transparent);background:color-mix(in srgb,var(--background-primary) 76%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,#0ea5e9 10%,transparent),0 10px 26px -22px rgba(15,23,42,.5)}
 
 /* 仪表卡与算力卡：统一轻玻璃质感 */
-.mal-dash-row>.mal-board,.mal-album-entry{border:1px solid color-mix(in srgb,var(--background-modifier-border) 46%,transparent);background:color-mix(in srgb,var(--background-primary) 62%,transparent);-webkit-backdrop-filter:blur(16px) saturate(1.2);backdrop-filter:blur(16px) saturate(1.2);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 32px -26px rgba(15,23,42,.5)}
-.mal-album-entry{background:linear-gradient(160deg,color-mix(in srgb,#0ea5e9 9%,color-mix(in srgb,var(--background-primary) 62%,transparent)),color-mix(in srgb,var(--background-primary) 62%,transparent) 72%)}
-.theme-dark .mal-dash-row>.mal-board,.theme-dark .mal-album-entry{box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 14px 34px -26px rgba(0,0,0,.7)}
+
 .theme-dark .mal-hero-search{box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 8px 26px -22px rgba(0,0,0,.8)}
 
 /* 分类芯片：胶囊 + 柔和选中态 */
@@ -553,94 +457,27 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-app-card:hover .mal-app-icon{transform:scale(1.06)}
 .mal-native-icon{filter:drop-shadow(0 3px 5px rgba(15,23,42,.14))}
 .mal-app-card:hover .mal-app-name{color:var(--text-normal)}
-@media(prefers-reduced-motion:reduce){.mal-app-card,.mal-app-icon,.mal-album-entry{transition:none}.mal-app-card:hover .mal-app-icon{transform:none}}
+@media(prefers-reduced-motion:reduce){.mal-app-card,.mal-app-icon{transition:none}.mal-app-card:hover .mal-app-icon{transform:none}}
 
 /* 并排两卡严格等高：入口卡补上 border-box，避免 padding 撑高 */
-.mal-album-entry{box-sizing:border-box}
 
 /* 键盘导航：搜索框 ↑↓ 高亮当前应用 */
 .mal-app-card.is-kb-active{background:color-mix(in srgb,#0ea5e9 9%,transparent);box-shadow:0 0 0 2px color-mix(in srgb,#0ea5e9 42%,transparent),0 10px 22px -18px rgba(15,23,42,.5)}
 .mal-app-card.is-kb-active .mal-app-name{color:var(--text-normal);font-weight:600}
 
 /* ===== 卡册列表卡（参考 aibotone 的横向福利卡） ===== */
-.mal-album-grid{display:flex;flex-direction:column;gap:11px}
-.mal-album-group-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}
-.mal-album-group{margin:0;font-size:13px;font-weight:650;color:var(--text-normal)}
-.mal-album-group-badge{padding:2px 9px;border-radius:999px;background:color-mix(in srgb,var(--background-modifier-border) 42%,transparent);font-size:10.5px;color:var(--text-muted);font-variant-numeric:tabular-nums}
-.mal-album-group-badge.is-done{background:color-mix(in srgb,#10b981 15%,transparent);color:#059669;font-weight:600}
-
-.mal-album-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr));gap:10px}
-.mal-album-row{position:relative;display:flex;align-items:center;gap:13px;padding:13px 15px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 55%,transparent);border-radius:15px;background:color-mix(in srgb,var(--background-primary) 58%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);cursor:pointer;transition:transform 120ms ease,box-shadow 120ms ease,border-color 120ms ease}
-.mal-album-row:hover{transform:translateY(-1px);border-color:color-mix(in srgb,#0ea5e9 38%,transparent);box-shadow:0 10px 24px -20px rgba(15,23,42,.45)}
-.mal-album-row.is-claimed{border-color:color-mix(in srgb,#10b981 42%,transparent);background:color-mix(in srgb,#10b981 6%,color-mix(in srgb,var(--background-primary) 58%,transparent))}
-.mal-album-row-icon{flex:0 0 42px;width:42px;height:42px;display:flex;align-items:center;justify-content:center;border-radius:12px;font-size:21px;line-height:1}
-.mal-album-row-body{flex:1;min-width:0}
-.mal-album-row-title{font-size:13px;font-weight:650;color:var(--text-normal);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mal-album-row-value{margin-top:2px;font-size:11.5px;font-weight:600;color:#059669}
-.mal-album-row-desc{margin-top:3px;font-size:10.5px;line-height:1.45;color:var(--text-faint);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.mal-album-row-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px}
-.mal-album-row-chip{padding:1px 7px;border-radius:6px;background:color-mix(in srgb,var(--background-modifier-border) 45%,transparent);font-size:9.5px;color:var(--text-muted);white-space:nowrap}
-.mal-album-row-chip.is-soft{background:transparent;color:var(--text-faint)}
-.mal-album-row-state{font-size:10px;color:var(--text-faint);white-space:nowrap}
-.mal-album-row-state.is-done{color:#059669}
-.mal-album-row-side{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap;min-width:190px}
-.mal-album-go{padding:7px 15px;border:0;border-radius:999px;background:linear-gradient(135deg,#38bdf8,#0284c7);color:#fff;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;box-shadow:0 6px 16px -10px rgba(2,132,199,.7);transition:transform 120ms ease,filter 120ms ease}
-.mal-album-go:hover{transform:translateY(-1px);filter:brightness(1.04)}
-.mal-album-go:active{transform:translateY(0);filter:brightness(.97)}
-.mal-album-confirm{padding:7px 11px;border:1px solid color-mix(in srgb,#10b981 42%,var(--background-modifier-border));border-radius:999px;background:color-mix(in srgb,#10b981 8%,var(--background-primary));color:var(--text-normal);font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap;transition:background 120ms ease,border-color 120ms ease,transform 120ms ease}
-.mal-album-confirm:hover{background:color-mix(in srgb,#10b981 15%,var(--background-primary));border-color:color-mix(in srgb,#10b981 65%,var(--background-modifier-border));transform:translateY(-1px)}
-.theme-dark .mal-album-confirm{color:var(--text-normal);border-color:color-mix(in srgb,#34d399 45%,var(--background-modifier-border))}
 
 /* 卡册列表行按钮组：主按钮 + 下拉箭头贴在一起 */
-.mal-album-go-wrap{display:inline-flex;border-radius:999px;overflow:hidden;box-shadow:0 6px 16px -10px rgba(2,132,199,.7)}
-.mal-album-go-wrap .mal-album-go{box-shadow:none}
-.mal-album-go.is-main{border-radius:999px 0 0 999px}
-.mal-album-go.is-arrow{border-radius:0 999px 999px 0;padding:7px 10px;min-width:26px;border-left:1px solid rgba(255,255,255,.35)}
 
 /* 详情弹窗按钮组 */
-.mal-detail-go-wrap{display:inline-flex;border-radius:8px;overflow:hidden}
-.mal-detail-go-wrap .mod-cta{border-radius:0}
+
 .mod-cta.is-arrow{border-left:1px solid rgba(255,255,255,.35);padding:4px 8px;min-width:24px}
 
 /* 已领印章：双线圆角框 + 轻微旋转 */
-.mal-album-stamp{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 10px;border:1.5px solid color-mix(in srgb,#059669 62%,transparent);border-radius:8px;color:#059669;transform:rotate(-6deg);opacity:.9}
-.mal-album-stamp::after{content:"";position:absolute;inset:2.5px;border:1px solid color-mix(in srgb,#059669 34%,transparent);border-radius:5px;pointer-events:none}
-.mal-album-stamp-main{font-size:10.5px;font-weight:700;letter-spacing:.04em}
-.mal-album-stamp-date{font-size:9px;letter-spacing:.06em;font-variant-numeric:tabular-nums}
-.mal-album-row-side>.mal-album-stamp{position:relative}
-.theme-dark .mal-album-stamp{border-color:color-mix(in srgb,#34d399 62%,transparent);color:#34d399}
-.theme-dark .mal-album-stamp::after{border-color:color-mix(in srgb,#34d399 34%,transparent)}
-.theme-dark .mal-album-row-value,.theme-dark .mal-album-row-state.is-done{color:#34d399}
-.theme-dark .mal-album-group-badge.is-done{color:#34d399}
-@media(max-width:640px){.mal-album-row{gap:10px;padding:11px 12px;flex-wrap:wrap}.mal-album-row-icon{flex-basis:36px;width:36px;height:36px;font-size:18px}.mal-album-row-body{flex:1 1 calc(100% - 58px)}.mal-album-row-side{width:100%;min-width:0;justify-content:flex-end}.mal-album-go{padding:6px 11px;font-size:11px}.mal-album-confirm{padding:6px 10px;font-size:10.5px}}
 
 /* ===== 分组主题色：新人礼包琥珀 / GPU 蓝 / 每日绿 / 每月紫 ===== */
-.mal-album-section{--alb:#0ea5e9;--alb-2:#0284c7}
-.mal-album-section[data-theme="newbie"]{--alb:#f59e0b;--alb-2:#d97706}
-.mal-album-section[data-theme="gpu"]{--alb:#3b82f6;--alb-2:#2563eb}
-.mal-album-section[data-theme="daily"]{--alb:#10b981;--alb-2:#059669}
-.mal-album-section[data-theme="monthly"]{--alb:#8b5cf6;--alb-2:#7c3aed}
-
-.mal-album-group{color:var(--text-normal)}
-.mal-album-group-badge{background:color-mix(in srgb,var(--alb) 12%,transparent);color:var(--alb-2)}
-.mal-album-group-badge.is-done{background:color-mix(in srgb,var(--alb) 16%,transparent);color:var(--alb-2);font-weight:600}
-.theme-dark .mal-album-group-badge.is-done{color:var(--alb)}
 
 /* 卡片：左侧主题色竖条 + 主题色面值 */
-.mal-album-row::before{content:"";position:absolute;left:0;top:11px;bottom:11px;width:3.5px;border-radius:0 3px 3px 0;background:var(--alb);opacity:.85}
-.mal-album-row-value{color:var(--alb-2)}
-.mal-album-row:hover{border-color:color-mix(in srgb,var(--alb) 42%,transparent);box-shadow:0 10px 24px -20px color-mix(in srgb,var(--alb-2) 45%,transparent)}
-.mal-album-row.is-claimed{border-color:color-mix(in srgb,var(--alb) 44%,transparent);background:color-mix(in srgb,var(--alb) 6%,color-mix(in srgb,var(--background-primary) 58%,transparent))}
-.mal-album-row-state.is-done{color:var(--alb-2)}
-.mal-album-row-link{font-size:10px;color:var(--alb-2);text-decoration:underline;text-underline-offset:2px;cursor:pointer;white-space:nowrap}
-.mal-album-row-link:hover{filter:brightness(1.1)}
-.mal-album-go{background:linear-gradient(135deg,var(--alb),var(--alb-2));box-shadow:0 6px 16px -10px color-mix(in srgb,var(--alb-2) 70%,transparent)}
-.mal-album-go-wrap{box-shadow:0 6px 16px -10px color-mix(in srgb,var(--alb-2) 70%,transparent)}
-.mal-album-stamp{border-color:color-mix(in srgb,var(--alb-2) 62%,transparent);color:var(--alb-2)}
-.mal-album-stamp::after{border-color:color-mix(in srgb,var(--alb-2) 32%,transparent)}
-.theme-dark .mal-album-row-value,.theme-dark .mal-album-row-state.is-done,.theme-dark .mal-album-row-link{color:var(--alb)}
-.theme-dark .mal-album-stamp{border-color:color-mix(in srgb,var(--alb) 62%,transparent);color:var(--alb)}
-.theme-dark .mal-album-stamp::after{border-color:color-mix(in srgb,var(--alb) 32%,transparent)}
 
 /* ===== 我的卡册：网格卡（收集进度） ===== */
 .mal-album-shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(156px,1fr));gap:11px;margin:0 0 20px}
@@ -665,23 +502,17 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-shelf-state{padding:2px 8px;border-radius:7px;font-size:9.5px;font-weight:600;white-space:nowrap;background:color-mix(in srgb,var(--background-modifier-border) 42%,transparent);color:var(--text-faint)}
 .mal-shelf-state.is-done{background:color-mix(in srgb,#10b981 14%,transparent);color:#059669}
 .theme-dark .mal-shelf-state.is-done{color:#34d399}
-.mal-album-divider{height:1px;margin:0 0 18px;background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--background-modifier-border) 90%,transparent),transparent)}
 
 /* ===== 首页工作区：卡册入口 + 常用应用 + 自定义入口卡，三块等宽 ===== */
 .mal-workspace{display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px;align-items:stretch;max-width:1060px;margin:0 auto 20px}
 .mal-ws-col{min-width:0;display:flex;flex-direction:column;padding:14px 15px;box-sizing:border-box;border:1px solid color-mix(in srgb,var(--background-modifier-border) 50%,transparent);border-radius:16px;background:color-mix(in srgb,var(--background-primary) 60%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 30px -26px rgba(15,23,42,.5)}
-.mal-ws-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 9px}
-.mal-ws-title{font-size:12px;font-weight:650;color:var(--text-normal)}
-.mal-ws-sub{font-size:10.5px;color:var(--text-faint);white-space:nowrap}
+
 /* 常用应用图标随列宽等比缩放，不溢出、不换行 */
 .mal-home-apps-grid{align-content:center}
 .mal-home-apps-grid .mal-quick-icon{width:100%;max-width:42px;height:auto;aspect-ratio:1;justify-self:center}
 .mal-home-apps-grid .mal-quick-icon .mal-native-icon{width:100%;height:100%}
 /* 三栏内：栏目本身已是卡片，去掉常用应用自己那层边框与背景，避免嵌套 */
 .mal-ws-col .mal-home-apps{flex:1 1 auto;margin:0;padding:0;border:none;background:none;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
-.mal-ws-left .mal-album-entry{flex:1 1 auto;width:100%;min-height:0;padding:0;border:0;background:transparent;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
-.mal-ws-left .mal-album-entry:hover{transform:none;box-shadow:none;border-color:transparent}
-.mal-ws-left .mal-album-entry::after{display:none}
 
 /* 中间：常用应用紧凑网格 */
 .mal-quick-grid{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:8px;align-content:start}
@@ -694,16 +525,6 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-quick-app:hover .mal-quick-name{color:var(--text-normal)}
 
 /* 右侧：当月小日历 */
-.mal-ws-right{gap:0}
-.mal-mini-grid{flex:1;display:grid;grid-template-columns:repeat(7,1fr);gap:3px;align-content:start}
-.mal-mini-wd{display:flex;align-items:center;justify-content:center;padding-bottom:2px;font-size:9px;color:var(--text-faint)}
-.mal-mini-cell{display:flex;align-items:center;justify-content:center;aspect-ratio:1;border-radius:5px;font-size:9.5px;color:var(--text-muted);cursor:pointer;background:color-mix(in srgb,var(--background-modifier-border) 32%,transparent);transition:outline-color 120ms ease}
-.mal-mini-cell.is-empty{background:transparent;cursor:default}
-.mal-mini-cell:not(.is-empty):hover{outline:1.5px solid color-mix(in srgb,#0ea5e9 50%,transparent);outline-offset:-1px}
-.mal-mini-cell.is-today{outline:1.5px solid #0ea5e9;outline-offset:-1px;font-weight:700;color:#0284c7}
-.mal-mini-cell.mal-cal-l1,.mal-mini-cell.mal-cal-l2,.mal-mini-cell.mal-cal-l3,.mal-mini-cell.mal-cal-l4{color:#0c4a6e}
-.theme-dark .mal-mini-cell.mal-cal-l1,.theme-dark .mal-mini-cell.mal-cal-l2,.theme-dark .mal-mini-cell.mal-cal-l3,.theme-dark .mal-mini-cell.mal-cal-l4{color:#0b1220}
-.mal-mini-foot{margin-top:9px;padding-top:9px;border-top:1px solid color-mix(in srgb,var(--background-modifier-border) 55%,transparent);font-size:10px;color:var(--text-faint);text-align:center}
 
 @media(max-width:1000px){.mal-workspace{grid-template-columns:1fr}}
 @media(max-width:680px){.mal-workspace{grid-template-columns:1fr}}
@@ -718,11 +539,6 @@ body.mal-resizing *{cursor:nwse-resize !important}
 @media(max-width:680px){.mal-quick-grid{grid-template-columns:repeat(5,1fr)}}
 
 /* 卡册页：全年活跃热力图容器 */
-.mal-album-heat{margin:0 0 18px;padding:14px 16px;box-sizing:border-box;border:1px solid color-mix(in srgb,var(--background-modifier-border) 50%,transparent);border-radius:16px;background:color-mix(in srgb,var(--background-primary) 60%,transparent);-webkit-backdrop-filter:blur(14px) saturate(1.2);backdrop-filter:blur(14px) saturate(1.2);box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 30px -26px rgba(15,23,42,.5)}
-.mal-album-heat .mal-cal-head{margin-bottom:8px}
-.mal-album-heat .mal-cal-empty{padding:10px 0 4px}
-.mal-album-heat .mal-cal-year-grid{height:116px}
-.mal-album-heat .mal-cal-year-cell{border-radius:3px}
 
 /* 两栏后常用应用变宽：8 列 × 2 行 */
 .mal-quick-grid{grid-template-columns:repeat(8,1fr)}
@@ -745,7 +561,6 @@ body.mal-resizing *{cursor:nwse-resize !important}
 @media(max-width:1000px){.mal-ws-mid .mal-quick-grid{grid-template-columns:repeat(8,1fr)}}
 @media(max-width:680px){.mal-ws-mid .mal-quick-grid{grid-template-columns:repeat(6,1fr)}}
 
-
 /* ===== 三块工作区：拖拽握柄与入口列表 ===== */
 .mal-ws-col{position:relative}
 .mal-ws-grip{position:absolute;top:6px;right:8px;padding:0 3px;border-radius:5px;font-size:12px;line-height:1;color:var(--text-faint);cursor:grab;opacity:0;transition:opacity 120ms ease,color 120ms ease;z-index:2}
@@ -755,7 +570,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-ws-col.is-ws-drop{outline:2px dashed color-mix(in srgb,#0ea5e9 55%,transparent);outline-offset:-3px}
 
 /* 握柄与标题错开，窄屏保持单列（覆盖内联列宽） */
-.mal-ws-col>.mal-ws-head{padding-right:15px}
+
 @media(max-width:1000px){.mal-workspace{grid-template-columns:1fr !important}}
 @media(max-width:680px){.mal-workspace{grid-template-columns:1fr !important}}
 
@@ -765,8 +580,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-entry-single .mal-entry-icon{font-size:21px;line-height:1}
 .mal-entry-single .mal-entry-title{font-size:13px;font-weight:700;line-height:1.4;color:var(--text-normal);transition:color 140ms ease}
 .mal-entry-single:hover .mal-entry-title{color:#0284c7}
-.mal-entry-single .mal-entry-sub{max-width:100%;font-size:10px;line-height:1.35;color:var(--text-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.mal-entry-single .mal-entry-sub:empty{display:none}
+
 .theme-dark .mal-entry-single:hover .mal-entry-title{color:#38bdf8}
 
 /* 自定义链接区：2×2 网格，空格显示 +，点开对应网址 */
@@ -791,9 +605,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-ad-empty{border:1px dashed var(--background-modifier-border);color:var(--text-faint)}
 .mal-ad-empty:hover{background:color-mix(in srgb,#0ea5e9 10%,transparent);color:#0284c7}
 .theme-dark .mal-ad-empty:hover{color:#7dd3fc}
-.mal-entry-add{margin-top:10px;padding:6px 10px;border:1px dashed var(--background-modifier-border);border-radius:10px;background:transparent;color:var(--text-muted);font-size:11px;cursor:pointer;transition:color 140ms ease,border-color 140ms ease}
-.mal-entry-add:hover{color:#0284c7;border-color:color-mix(in srgb,#0ea5e9 45%,transparent)}
-.theme-dark .mal-entry-add:hover{color:#7dd3fc}
+
 /* 自定义链接编辑弹窗 */
 .mal-entry-edit-list{display:flex;flex-direction:column;gap:8px;margin:6px 0 12px}
 .mal-entry-edit-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--background-modifier-border);border-radius:10px}
@@ -804,14 +616,11 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-danger-text{color:var(--text-error)}
 
 /* 卡册卡片：已检测到本地客户端的小标记 */
-.mal-album-row-chip.is-client{border-color:transparent;background:color-mix(in srgb,#0ea5e9 12%,transparent);color:#0284c7;font-weight:600}
-.theme-dark .mal-album-row-chip.is-client{background:color-mix(in srgb,#38bdf8 16%,transparent);color:#7dd3fc}
-
 
 /* ===== 1.28.0：统一应用资源与福利卡册 ===== */
-.mal-album-row.is-expired{opacity:.62;filter:saturate(.72)}
+
 .mal-shelf-card.is-expired{opacity:.58;filter:saturate(.7)}
-.mal-album-row-chip.is-web{background:color-mix(in srgb,#64748b 11%,var(--background-primary));color:var(--text-muted)}
+
 .mal-compute-enabled-row{display:flex;align-items:center;gap:9px;margin:10px 0 4px;color:var(--text-normal);font-size:13px}
 .mal-compute-enabled-row input{accent-color:var(--interactive-accent)}
 .mal-compute-confirm-detail{border-color:color-mix(in srgb,#10b981 45%,var(--background-modifier-border))!important}
@@ -840,12 +649,7 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-compute-detail-status.is-done{color:#059669}
 .theme-dark .mal-compute-detail-status.is-done{color:#34d399}
 @media (max-width:760px){.mal-compute-overlay{flex-direction:column;gap:14px;padding:24px}.mal-compute-peek{flex:0 0 auto;flex-direction:row;gap:12px;padding:14px 16px}.mal-peek-icon{width:56px;height:56px;font-size:28px;border-radius:16px}.mal-compute-panel{flex:1 1 auto;width:100%;max-height:none}}
-.mal-compute-history{margin:16px 0;padding:12px 14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
-.mal-compute-history-row{display:grid;grid-template-columns:minmax(90px,1fr) 54px minmax(110px,auto);gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--background-modifier-border)}
-.mal-compute-history-row:last-child{border-bottom:0}
-.mal-compute-history-date{font-size:12px;color:var(--text-normal);font-variant-numeric:tabular-nums}
-.mal-compute-history-period{font-size:11px;color:var(--text-muted)}
-.mal-compute-history-value{font-size:11px;color:var(--text-muted);text-align:right}
+
 .mal-app-linked-benefits{display:flex;flex-direction:column;gap:7px;margin:8px 0 12px}
 .mal-app-linked-benefit{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;border:1px solid var(--background-modifier-border);border-radius:10px;background:var(--background-secondary)}
 .mal-app-linked-benefit-info{min-width:0;flex:1}
@@ -853,8 +657,8 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-app-path{overflow-wrap:anywhere}
 .mal-detail-note-row .mal-detail-meta{min-width:0;overflow-wrap:anywhere}
 @media(max-width:640px){
-  .mal-compute-history-row{grid-template-columns:1fr 46px;gap:4px}
-  .mal-compute-history-value{grid-column:1/-1;text-align:left}
+  
+  
   .mal-app-linked-benefit{align-items:flex-start}
 }
 
