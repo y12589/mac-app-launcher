@@ -2528,6 +2528,8 @@ class MacAppLauncherView extends ItemView {
     picon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 20%, transparent)`;
     peek.createDiv({ cls: "mal-peek-name", text: card.name });
     peek.createDiv({ cls: "mal-peek-tier", text: cycle === "once" ? "一次性卡" : cycle === "daily" ? "普通卡" : "月度卡" });
+    // 左侧放大卡等翻转动画结束后再入场，避免与飞行中的卡片重叠
+    peek.style.animationDelay = reducedMotion ? "0ms" : "300ms";
 
     // 卡片从原位翻转飞出，落到左侧放大卡的位置
     if (originEl && !reducedMotion) {
@@ -2548,7 +2550,6 @@ class MacAppLauncherView extends ItemView {
       });
       document.body.appendChild(ghost);
       originEl.style.visibility = "hidden";
-      peek.style.opacity = "0";
       const c1x = from.left + from.width / 2;
       const c1y = from.top + from.height / 2;
       const c2x = to.left + to.width / 2;
@@ -2556,22 +2557,22 @@ class MacAppLauncherView extends ItemView {
       const sc = Math.max(to.width / from.width, to.height / from.height);
       const dx = c2x - c1x;
       const dy = c2y - c1y;
-      requestAnimationFrame(() => {
-        if (!ghost) return;
-        ghost.style.transition = "transform 480ms cubic-bezier(.2,.85,.3,1), opacity 480ms ease";
-        ghost.style.transformOrigin = "center center";
-        ghost.style.transform = `perspective(1000px) translate(${dx}px, ${dy}px) scale(${sc}) rotateY(180deg)`;
-        ghost.style.opacity = "0.12";
-      });
-      window.setTimeout(() => {
+      const anim = ghost.animate(
+        [
+          { transform: "perspective(1000px) translate3d(0,0,0) scale(1) rotateY(0deg)", opacity: "1" },
+          { transform: `perspective(1000px) translate3d(${dx}px, ${dy}px, 0) scale(${sc}) rotateY(180deg)`, opacity: "0.15" }
+        ],
+        { duration: 300, easing: "cubic-bezier(.2,.85,.3,1)", fill: "forwards" }
+      );
+      anim.onfinish = () => {
         if (ghost) { ghost.remove(); ghost = null; }
-        peek.style.opacity = "";
         if (originEl) originEl.style.visibility = "";
-      }, 500);
+      };
     }
 
     // 右侧：详情面板
     const panel = overlay.createDiv({ cls: "mal-compute-panel" });
+    panel.style.animationDelay = reducedMotion ? "0ms" : "320ms";
     const head = panel.createDiv({ cls: "mal-panel-head" });
     head.createSpan({ cls: "mal-panel-badge", text: cycle === "once" ? "一次性卡" : cycle === "daily" ? "普通卡" : "月度卡" });
     const closeBtn = head.createEl("button", { cls: "mal-panel-close", text: "✕" });

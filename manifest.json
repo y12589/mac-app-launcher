@@ -1,7 +1,7 @@
 {
   "id": "mac-app-launcher",
   "name": "Mac App Launcher",
-  "version": "1.32.0",
+  "version": "1.32.1",
   "minAppVersion": "1.13.0",
   "description": "macOS 应用快捷启动与算力福利卡册：顶部常用应用，首页集中管理福利领取与历史记录。",
   "author": "阎大大",
