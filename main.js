@@ -2309,21 +2309,26 @@ class MacAppLauncherView extends ItemView {
     }) : s.cards;
     const wrap = body.createDiv({ cls: "mal-album" });
 
-    wrap.createDiv({
-      cls: "mal-album-notice",
+    const hero = wrap.createDiv({ cls: "mal-album-hero" });
+    const heroHead = hero.createDiv({ cls: "mal-album-hero-head" });
+    heroHead.createSpan({ cls: "mal-album-hero-title", text: "👑 AI 算力福利" });
+    heroHead.createSpan({
+      cls: "mal-album-hero-note",
       text: "活动由各官方组织运营，与本插件无关；福利可能过期下架或名额有限，领取结果请以平台为准。"
     });
 
-    const stats = wrap.createDiv({ cls: "mal-album-stats" });
-    const stat = (label, value, sub, accent) => {
+    const stats = hero.createDiv({ cls: "mal-album-stats" });
+    const stat = (icon, label, value, sub, accent) => {
       const box = stats.createDiv({ cls: `mal-album-stat${accent ? " is-accent" : ""}` });
-      box.createDiv({ cls: "mal-album-stat-label", text: label });
-      box.createDiv({ cls: "mal-album-stat-value", text: value });
-      box.createDiv({ cls: "mal-album-stat-sub", text: sub });
+      box.createDiv({ cls: "mal-album-stat-icon", text: icon });
+      const body = box.createDiv({ cls: "mal-album-stat-body" });
+      body.createDiv({ cls: "mal-album-stat-label", text: label });
+      body.createDiv({ cls: "mal-album-stat-value", text: value });
+      body.createDiv({ cls: "mal-album-stat-sub", text: sub });
     };
-    stat("当前可领价值", `¥${s.openValue}`, `${s.openCount} 个有效福利待领`, true);
-    stat("本周期已收", `${s.doneCount} 张`, `卡册共 ${s.cards.length} 张`, false);
-    stat("累计已领价值", `¥${s.claimedValue}`, `共打卡 ${s.total} 次`, false);
+    stat("🪙", "当前可领价值", `¥${s.openValue}`, `${s.openCount} 个有效福利待领`, true);
+    stat("✅", "本期已收", `${s.doneCount} 张`, `卡册共 ${s.cards.length} 张`, false);
+    stat("📈", "累计已领价值", `¥${s.claimedValue}`, `共打卡 ${s.total} 次`, false);
 
     const head = wrap.createDiv({ cls: "mal-album-head" });
     head.createEl("h3", { text: "AI 算力卡册" });
@@ -2352,7 +2357,7 @@ class MacAppLauncherView extends ItemView {
     }
   }
 
-  // 卡册网格里的单张卡：面值在上、图标居中、名称与状态在下
+  // 卡册网格里的单张卡：面值在上、图标+名称居中、底部双标签
   renderShelfCard(grid, card, s) {
     const claimed = s.claimed.has(card.id);
     const available = isComputeCardInValidity(card);
@@ -2362,17 +2367,22 @@ class MacAppLauncherView extends ItemView {
 
     const top = el.createDiv({ cls: "mal-shelf-top" });
     top.createSpan({ cls: "mal-shelf-value", text: card.value || "—" });
-    if (claimed) top.createSpan({ cls: "mal-shelf-dot" });
+    top.createSpan({ cls: `mal-shelf-dot${claimed ? " is-on" : " is-off"}` });
 
-    const icon = el.createDiv({ cls: "mal-shelf-icon", text: card.emoji || "⚡" });
+    const main = el.createDiv({ cls: "mal-shelf-main" });
+    const icon = main.createDiv({ cls: "mal-shelf-icon", text: card.emoji || "⚡" });
     icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 18%, transparent)`;
+    main.createDiv({ cls: "mal-shelf-name", text: card.name });
 
-    el.createDiv({ cls: "mal-shelf-name", text: card.name });
-    const statusLabel = claimed ? "已收" : !available ? (card.enabled === false ? "已停用" : "未生效 / 已过期") : "待收";
-    el.createDiv({ cls: "mal-shelf-meta", text: `${cycleLabel} · ${statusLabel}` });
+    const foot = el.createDiv({ cls: "mal-shelf-foot" });
+    foot.createSpan({ cls: "mal-shelf-cycle", text: `📅 ${cycleLabel}` });
+    const isDone = claimed;
+    const stateText = isDone ? "✓ 已收" : !available ? (card.enabled === false ? "已停用" : "已过期") : "○ 待收";
+    foot.createSpan({ cls: `mal-shelf-state${isDone ? " is-done" : ""}`, text: stateText });
 
+    el.setAttribute("data-card-id", card.id);
     el.setAttribute("title", `${card.name} · ${card.value || ""}${claimed ? " · 已收" : " · 待收"}`);
-    el.addEventListener("click", () => this.openCardDetail(card));
+    el.addEventListener("click", () => this.openCardDetail(card, el));
     el.addEventListener("contextmenu", event => {
       event.preventDefault();
       this.openAlbumCardMenu(card, event);
@@ -2483,149 +2493,170 @@ class MacAppLauncherView extends ItemView {
   }
 
   // 卡片详情：说明 + 客户端/网页入口 + 人工标记/取消 + 编辑删除
-  openCardDetail(card) {
-    const modal = new Modal(this.app);
-    modal.onOpen = () => {
-      const el = modal.contentEl;
-      el.addClass("mal-compute-detail");
-      const s = this.computeSummary();
-      const claimed = s.claimed.has(card.id);
-      const last = s.lastClaim(card);
-      const cycle = card.cycle || "daily";
-      const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
-      const localApp = this.resolveCardApp(card);
-      const installed = isAppBundleInstalled(localApp);
-      const webUrl = this.getCardWebUrl(card, localApp);
-      const available = isComputeCardInValidity(card);
+  openCardDetail(card, srcEl = null) {
+    const s = this.computeSummary();
+    const claimed = s.claimed.has(card.id);
+    const last = s.lastClaim(card);
+    const cycle = card.cycle || "daily";
+    const cycleLabel = cycle === "once" ? "一次性" : cycle === "daily" ? "每日" : "每月";
+    const localApp = this.resolveCardApp(card);
+    const installed = isAppBundleInstalled(localApp);
+    const webUrl = this.getCardWebUrl(card, localApp);
+    const available = isComputeCardInValidity(card);
 
-      const top = el.createDiv({ cls: "mal-compute-detail-top" });
-      const icon = top.createDiv({ cls: "mal-album-card-icon", text: card.emoji || "⚡" });
-      icon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 20%, transparent)`;
-      const names = top.createDiv({ cls: "mal-detail-names" });
-      names.createEl("h3", { text: card.name });
-      names.createDiv({
-        cls: "mal-detail-meta",
-        text: `${card.value || "—"}${card.amount ? ` · 参考估值 ¥${card.amount}` : ""} · ${cycleLabel}`
+    const overlay = document.body.createDiv({ cls: "mal-compute-overlay" });
+    const reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const originEl = srcEl || document.querySelector(`.mal-shelf-card[data-card-id="${card.id}"]`);
+    let ghost = null;
+    const restoreOrigin = () => {
+      if (ghost) { ghost.remove(); ghost = null; }
+      if (originEl) originEl.style.visibility = "";
+    };
+    const closeOverlay = () => {
+      restoreOrigin();
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+    };
+    const onKey = evt => { if (evt.key === "Escape") closeOverlay(); };
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("click", evt => { if (evt.target === overlay) closeOverlay(); });
+
+    // 左侧：放大浮起的卡片
+    const peek = overlay.createDiv({ cls: "mal-compute-peek" });
+    peek.createDiv({ cls: "mal-peek-kicker", text: card.value || cycleLabel });
+    const picon = peek.createDiv({ cls: "mal-peek-icon", text: card.emoji || "⚡" });
+    picon.style.background = `color-mix(in srgb, ${card.color || "#0ea5e9"} 20%, transparent)`;
+    peek.createDiv({ cls: "mal-peek-name", text: card.name });
+    peek.createDiv({ cls: "mal-peek-tier", text: cycle === "once" ? "一次性卡" : cycle === "daily" ? "普通卡" : "月度卡" });
+
+    // 卡片从原位翻转飞出，落到左侧放大卡的位置
+    if (originEl && !reducedMotion) {
+      const from = originEl.getBoundingClientRect();
+      const to = peek.getBoundingClientRect();
+      ghost = originEl.cloneNode(true);
+      ghost.classList.add("mal-flip-ghost");
+      Object.assign(ghost.style, {
+        position: "fixed",
+        left: from.left + "px",
+        top: from.top + "px",
+        width: from.width + "px",
+        height: from.height + "px",
+        margin: "0",
+        zIndex: "10000",
+        pointerEvents: "none",
+        opacity: "1"
       });
+      document.body.appendChild(ghost);
+      originEl.style.visibility = "hidden";
+      peek.style.opacity = "0";
+      const c1x = from.left + from.width / 2;
+      const c1y = from.top + from.height / 2;
+      const c2x = to.left + to.width / 2;
+      const c2y = to.top + to.height / 2;
+      const sc = Math.max(to.width / from.width, to.height / from.height);
+      const dx = c2x - c1x;
+      const dy = c2y - c1y;
+      requestAnimationFrame(() => {
+        if (!ghost) return;
+        ghost.style.transition = "transform 480ms cubic-bezier(.2,.85,.3,1), opacity 480ms ease";
+        ghost.style.transformOrigin = "center center";
+        ghost.style.transform = `perspective(1000px) translate(${dx}px, ${dy}px) scale(${sc}) rotateY(180deg)`;
+        ghost.style.opacity = "0.12";
+      });
+      window.setTimeout(() => {
+        if (ghost) { ghost.remove(); ghost = null; }
+        peek.style.opacity = "";
+        if (originEl) originEl.style.visibility = "";
+      }, 500);
+    }
 
-      if (card.desc) el.createEl("p", { cls: "mal-compute-detail-desc", text: card.desc });
-      if (localApp) {
-        el.createEl("p", {
-          cls: "mal-compute-detail-desc",
-          text: `关联应用：${localApp.name} · ${installed ? "检测到本地客户端" : isWebOnlyApp(localApp) ? "网页应用资源" : "本地客户端当前不可用"}`
+    // 右侧：详情面板
+    const panel = overlay.createDiv({ cls: "mal-compute-panel" });
+    const head = panel.createDiv({ cls: "mal-panel-head" });
+    head.createSpan({ cls: "mal-panel-badge", text: cycle === "once" ? "一次性卡" : cycle === "daily" ? "普通卡" : "月度卡" });
+    const closeBtn = head.createEl("button", { cls: "mal-panel-close", text: "✕" });
+    closeBtn.addEventListener("click", closeOverlay);
+    panel.createEl("h3", { cls: "mal-panel-title", text: card.name });
+
+    const rows = panel.createDiv({ cls: "mal-panel-rows" });
+    const row = (k, v) => {
+      const r = rows.createDiv({ cls: "mal-panel-row" });
+      r.createDiv({ cls: "mal-panel-k", text: k });
+      r.createDiv({ cls: "mal-panel-v", text: v || "—" });
+    };
+    row("奖励", card.value || "—");
+    row("说明", card.desc || "—");
+    row("参与条件", localApp ? `使用 ${localApp.name}，具体以平台说明为准` : "以平台说明为准");
+    row("领取与刷新", cycle === "once" ? "仅可领取一次" : cycle === "daily" ? "每天可领取一次" : "每个自然月可领取一次");
+    row("有效期", `${card.validFrom || "不限"} 至 ${card.validUntil || "不限"}`);
+    row("使用范围", card.amount ? `参考估值 ¥${card.amount}` : "以平台发放为准");
+    row("类型", cycle === "once" ? "一次性" : cycle === "daily" ? "每天都能领" : "每月可领");
+    row("已领", claimed ? `本周期已领${last ? `（${last}）` : ""}` : "本周期未领");
+    if (webUrl) row("网页入口", webUrl);
+
+    const status = panel.createDiv({ cls: `mal-compute-detail-status${claimed ? " is-done" : ""}` });
+    status.setText(claimed
+      ? `本周期已收${last ? ` · ${last}` : ""}`
+      : !available
+        ? (card.enabled === false ? "此福利已停用" : "当前不在福利有效期")
+        : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
+
+    if (!claimed && available) {
+      panel.createEl("p", {
+        cls: "mal-panel-hint",
+        text: "打开客户端或网页不会自动记为已领取。完成实际领取后，请返回这里点击「标记已收」。"
+      });
+    }
+
+    const actions = panel.createDiv({ cls: "mal-mood-actions" });
+    if (!claimed && available) {
+      if (installed || webUrl) {
+        const mainLabel = installed ? "尝试打开客户端" : "打开网页";
+        const mainBtn = actions.createEl("button", { cls: "mod-cta", text: `${mainLabel} ↗` });
+        mainBtn.addEventListener("click", async () => {
+          const opened = await this.launchOrOpen(card, localApp, "smart");
+          if (opened) new Notice("入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
         });
-      }
-      if (webUrl) {
-        el.createEl("p", { cls: "mal-compute-detail-desc", text: `网页备用入口：${webUrl}` });
-      }
-      if (card.validFrom || card.validUntil) {
-        el.createEl("p", {
-          cls: "mal-compute-detail-desc",
-          text: `有效期：${card.validFrom || "不限"} 至 ${card.validUntil || "不限"}`
-        });
-      }
-
-      const status = el.createDiv({ cls: `mal-compute-detail-status${claimed ? " is-done" : ""}` });
-      status.setText(claimed
-        ? `本周期已收${last ? ` · ${last}` : ""}`
-        : !available
-          ? (card.enabled === false ? "此福利已停用" : "当前不在福利有效期")
-          : `本周期未收${last ? ` · 上次 ${last}` : ""}`);
-
-      const history = s.records
-        .filter(record => record.cardId === card.id)
-        .sort((a, b) => claimTimestamp(b) - claimTimestamp(a))
-        .slice(0, 8);
-      const historySection = el.createDiv({ cls: "mal-compute-history" });
-      historySection.createDiv({ cls: "mal-detail-label", text: `领取历史（${history.length} 条最近记录）` });
-      if (history.length) {
-        for (const record of history) {
-          const row = historySection.createDiv({ cls: "mal-compute-history-row" });
-          const timestamp = claimTimestamp(record);
-          const date = timestamp
-            ? dateKey(new Date(timestamp))
-            : (isValidDateKey(record.periodKey) ? record.periodKey : String(record.periodKey || "日期未知"));
-          const period = canonicalClaimPeriod(record, card);
-          row.createSpan({ text: date, cls: "mal-compute-history-date" });
-          row.createSpan({
-            text: period === "once" ? "一次性" : /^\d{4}-\d{2}$/.test(period) ? "月度" : "每日",
-            cls: "mal-compute-history-period"
-          });
-          row.createSpan({
-            text: `领取时估值 ¥${Number(record.amountSnapshot) || 0}`,
-            cls: "mal-compute-history-value"
+        if (installed && webUrl) {
+          const arrow = actions.createEl("button", { text: "切换入口 ▾" });
+          arrow.addEventListener("click", event => {
+            event.stopPropagation();
+            const menu = new Menu();
+            menu.addItem(item => item.setTitle(`打开客户端 · ${localApp.name}`).setIcon("play").onClick(async () => {
+              const opened = await this.launchOrOpen(card, localApp, "client");
+              if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
+            }));
+            menu.addItem(item => item.setTitle("打开网页 ↗").setIcon("external-link").onClick(async () => {
+              const opened = await this.openUrlOnly(card, localApp);
+              if (opened) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
+            }));
+            menu.showAtEvent(event);
           });
         }
       } else {
-        historySection.createDiv({ text: "尚无领取记录", cls: "mal-detail-meta" });
+        actions.createSpan({ cls: "mal-muted", text: "尚未配置可用的客户端或网页入口" });
       }
-
-      if (!claimed && available) {
-        el.createEl("p", {
-          cls: "mal-muted",
-          text: "打开客户端或网页不会自动记为已领取。完成实际领取后，请返回这里点击「标记已收」。"
-        });
-      }
-
-      const actions = el.createDiv({ cls: "mal-mood-actions" });
-      if (!claimed && available) {
-        if (installed || webUrl) {
-          const mainLabel = installed ? "打开客户端" : "打开网页";
-          const mainBtn = actions.createEl("button", { cls: "mod-cta", text: `${mainLabel} ↗` });
-          mainBtn.addEventListener("click", async () => {
-            const opened = await this.launchOrOpen(card, localApp, "smart");
-            if (opened) new Notice("入口已打开。完成实际领取后，请返回此处点击「标记已收」。", 6000);
-          });
-          if (installed && webUrl) {
-            const arrow = actions.createEl("button", { text: "切换入口 ▾" });
-            arrow.addEventListener("click", event => {
-              event.stopPropagation();
-              const menu = new Menu();
-              menu.addItem(item => item
-                .setTitle(`打开客户端 · ${localApp.name}`)
-                .setIcon("play")
-                .onClick(async () => {
-                  const opened = await this.launchOrOpen(card, localApp, "client");
-                  if (opened) new Notice("客户端入口已打开。完成实际领取后，请手动标记。", 6000);
-                }));
-              menu.addItem(item => item
-                .setTitle("打开网页 ↗")
-                .setIcon("external-link")
-                .onClick(async () => {
-                  const opened = await this.openUrlOnly(card, localApp);
-                  if (opened) new Notice("网页入口已打开。完成实际领取后，请手动标记。", 6000);
-                }));
-              menu.showAtEvent(event);
-            });
-          }
-        } else {
-          actions.createSpan({ cls: "mal-muted", text: "尚未配置可用的客户端或网页入口" });
-        }
-      }
-
-      if (claimed) {
-        const undo = actions.createEl("button", { text: "取消本周期记录" });
-        undo.addEventListener("click", async () => {
-          await this.uncheckCard(card);
-          modal.close();
-          this.render();
-        });
-      } else if (available) {
-        const mark = actions.createEl("button", { text: "标记已收", cls: "mal-compute-confirm-detail" });
-        mark.addEventListener("click", async () => {
-          await this.checkinCard(card.id);
-          modal.close();
-          this.render();
-        });
-      }
-      const edit = actions.createEl("button", { text: "编辑" });
-      edit.addEventListener("click", () => {
-        modal.close();
-        new ComputeCardModal(this.app, this.plugin, card, () => this.render()).open();
+    }
+    if (claimed) {
+      const undo = actions.createEl("button", { text: "取消本周期记录" });
+      undo.addEventListener("click", async () => {
+        await this.uncheckCard(card);
+        closeOverlay();
+        this.render();
       });
-    };
-    modal.onClose = () => modal.contentEl.empty();
-    modal.open();
+    } else if (available) {
+      const mark = actions.createEl("button", { text: "标记已收", cls: "mal-compute-confirm-detail" });
+      mark.addEventListener("click", async () => {
+        await this.checkinCard(card.id);
+        closeOverlay();
+        this.render();
+      });
+    }
+    const edit = actions.createEl("button", { text: "编辑" });
+    edit.addEventListener("click", () => {
+      closeOverlay();
+      new ComputeCardModal(this.app, this.plugin, card, () => this.render()).open();
+    });
   }
 
   // 福利卡片通过稳定 appId 关联统一应用资源。
