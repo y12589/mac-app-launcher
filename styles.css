@@ -294,7 +294,7 @@
 .mal-album{max-width:1060px;margin:0 auto}
 
 /* 顶部福利统计区：淡色渐变容器 + 三张白色统计卡 */
-.mal-album-hero{padding:16px 18px 18px;border:1px solid color-mix(in srgb,#8b5cf6 14%,var(--background-modifier-border));border-radius:18px;background:linear-gradient(135deg,color-mix(in srgb,#8b5cf6 8%,var(--background-primary)),color-mix(in srgb,#0ea5e9 7%,var(--background-primary)) 60%,var(--background-primary));margin:0 0 20px}
+.mal-album-hero{padding:16px 18px 18px;border:1px solid color-mix(in srgb,#8b5cf6 14%,var(--background-modifier-border));border-radius:18px;background:linear-gradient(135deg,color-mix(in srgb,#8b5cf6 8%,var(--background-primary)),color-mix(in srgb,#0ea5e9 7%,var(--background-primary)) 60%,var(--background-primary));margin:0 0 36px}
 .mal-album-hero-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .mal-album-hero-title{font-size:14px;font-weight:700;letter-spacing:.01em;color:var(--text-normal)}
 .mal-album-hero-note{flex:1;min-width:200px;text-align:right;font-size:10.5px;line-height:1.4;color:var(--text-faint)}
@@ -682,3 +682,24 @@ body.mal-resizing *{cursor:nwse-resize !important}
 .mal-home-apps-empty .mal-home-apps-manage{white-space:nowrap}
 .mal-home-apps-grid .mal-quick-app.is-pinned{cursor:grab}
 @media(max-width:680px){.mal-home-apps{padding:10px 10px 8px;margin-bottom:14px}.mal-home-apps-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}.mal-home-apps-grid .mal-quick-icon,.mal-home-apps-grid .mal-quick-icon .mal-native-icon{width:34px;height:34px}.mal-home-apps-grid .mal-quick-name{font-size:9px}}
+
+/* ===== 打卡进度模块：连续天数 + 收集等级（左） + 最近14天格子（右） ===== */
+.mal-checkin{display:grid;grid-template-columns:1fr 1.5fr;gap:14px;margin:0 0 28px}
+.mal-checkin-left,.mal-checkin-right{padding:14px 16px;border:1px solid color-mix(in srgb,var(--background-modifier-border) 80%,transparent);border-radius:14px;background:color-mix(in srgb,var(--background-primary) 84%,transparent)}
+.mal-checkin-label{font-size:10.5px;color:var(--text-faint)}
+.mal-checkin-streak{display:flex;align-items:baseline;gap:4px;margin-top:10px;font-size:32px;font-weight:700;line-height:1;color:var(--text-normal);font-variant-numeric:tabular-nums}
+.mal-checkin-unit{font-size:12px;font-weight:500;color:var(--text-muted)}
+.mal-checkin-level{margin-top:12px;font-size:12.5px;font-weight:600;color:var(--text-normal)}
+.mal-checkin-days{display:grid;grid-template-columns:repeat(14,1fr);gap:5px;margin-top:12px}
+.mal-checkin-day{display:flex;align-items:center;justify-content:center;height:34px;border-radius:7px;background:color-mix(in srgb,var(--background-modifier-border) 36%,transparent);font-size:9px;line-height:1;color:var(--text-faint);font-variant-numeric:tabular-nums}
+.mal-checkin-day.is-on{background:color-mix(in srgb,#10b981 28%,transparent);color:#059669;font-weight:600}
+.theme-dark .mal-checkin-day.is-on{color:#34d399}
+.mal-checkin-day.is-today{box-shadow:inset 0 0 0 1px color-mix(in srgb,#0ea5e9 60%,transparent)}
+@media(max-width:680px){.mal-checkin{grid-template-columns:1fr;gap:10px}.mal-checkin-days{grid-template-columns:repeat(7,1fr)}}
+
+/* ===== 领取教程弹窗 ===== */
+.mal-guide-modal{padding:2px}
+.mal-guide-item{padding:10px 0;border-bottom:1px solid color-mix(in srgb,var(--background-modifier-border) 60%,transparent)}
+.mal-guide-item:last-child{border-bottom:0}
+.mal-guide-title{font-size:12.5px;font-weight:600;color:var(--text-normal)}
+.mal-guide-desc{margin-top:3px;font-size:11.5px;line-height:1.55;color:var(--text-muted)}

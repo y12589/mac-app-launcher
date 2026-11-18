@@ -616,6 +616,42 @@ function dateKey(date) {
   return `${y}-${m}-${d}`;
 }
 
+// —— 打卡统计纯函数（卡册使用，也供单元测试直接复用）——
+
+// 按累计领取次数映射收集等级（青铜 → 白银 → 黄金 → 铂金 → 钻石）。
+function collectLevel(totalClaims) {
+  if (totalClaims >= 100) return { icon: "👑", name: "钻石" };
+  if (totalClaims >= 60) return { icon: "💎", name: "铂金" };
+  if (totalClaims >= 30) return { icon: "🥇", name: "黄金" };
+  if (totalClaims >= 10) return { icon: "🥈", name: "白银" };
+  return { icon: "🥉", name: "青铜" };
+}
+
+// 根据已打卡日期集合与今天，计算整体连续打卡天数。
+// 今天未打卡则从昨天起算（连续尚未中断）；中间断档则返回 0。
+function computeStreakDays(claimDates, todayKey) {
+  const cursor = new Date(`${todayKey}T12:00:00`);
+  if (!claimDates.has(todayKey)) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  while (claimDates.has(dateKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+// 生成最近 14 天（含今天）的打卡状态数组，索引 0 为最早一天。
+function buildRecent14(todayKey, claimDates) {
+  const days = [];
+  for (let i = 13; i >= 0; i--) {
+    const day = new Date(`${todayKey}T12:00:00`);
+    day.setDate(day.getDate() - i);
+    const key = dateKey(day);
+    days.push({ key, day: day.getDate(), checked: claimDates.has(key), isToday: i === 0 });
+  }
+  return days;
+}
+
 function getCalendarInfo(date) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
@@ -899,6 +935,38 @@ class ComputeCardModal extends Modal {
     });
     const cancel = actions.createEl("button", { text: "取消" });
     cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// 领取教程内容（模块级常量，供弹窗渲染与单元测试校验）
+const COMPUTE_GUIDE_STEPS = [
+  ["领取福利", "点卡片 → 打开客户端或网页 → 完成平台上的实际领取 → 返回点击「标记已收」。"],
+  ["打开入口", "装了客户端的卡片优先启动客户端，可用 ▾ 切换为打开网页；没有客户端时直接用网页入口。"],
+  ["领取周期", "一次性卡只收一次；每日卡每天可收；每月卡每个自然月可收一次。"],
+  ["连续打卡", "当天任意一张卡完成领取即记为打卡一天，连续天数越高代表越坚持。"],
+  ["收集等级", "累计领取次数越多，收集等级越高（青铜 → 白银 → 黄金 → 铂金 → 钻石）。"],
+  ["重要提示", "福利由各官方组织运营，可能过期或名额有限，领取结果以平台为准。"],
+];
+
+// 领取教程弹窗：说明怎么领取、周期、连续打卡与收集等级
+class ComputeGuideModal extends Modal {
+  constructor(app) {
+    super(app);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("mal-guide-modal");
+    contentEl.createEl("h3", { text: "领取教程" });
+    for (const [title, desc] of COMPUTE_GUIDE_STEPS) {
+      const item = contentEl.createDiv({ cls: "mal-guide-item" });
+      item.createDiv({ cls: "mal-guide-title", text: title });
+      item.createDiv({ cls: "mal-guide-desc", text: desc });
+    }
   }
 
   onClose() {
@@ -2172,6 +2240,23 @@ class MacAppLauncherView extends ItemView {
       isComputeCardInValidity(card, todayKey) && !claimed.has(card.id)
     );
     const valid = cards.filter(card => isComputeCardInValidity(card, todayKey));
+
+    // 派生打卡统计：整体连续天数、最近 14 天、收集等级（均从领取记录实时计算，不新增持久化字段）
+    const claimDates = new Set();
+    for (const record of validRecords) {
+      const ts = claimTimestamp(record);
+      if (ts) {
+        claimDates.add(dateKey(new Date(ts)));
+        continue;
+      }
+      const period = canonicalClaimPeriod(record, byId.get(String(record.cardId || "")));
+      if (isValidDateKey(period)) claimDates.add(period);
+    }
+    const totalClaims = validRecords.length;
+    const streak = computeStreakDays(claimDates, todayKey);
+    const recent14 = buildRecent14(todayKey, claimDates);
+    const level = collectLevel(totalClaims);
+
     return {
       cards,
       records,
@@ -2183,7 +2268,10 @@ class MacAppLauncherView extends ItemView {
       validCount: valid.length,
       expiredCount: cards.length - valid.length,
       claimedValue,
-      total: validRecords.length,
+      total: totalClaims,
+      streak,
+      recent14,
+      level,
       lastClaim,
       lastClaimRecord
     };
@@ -2221,10 +2309,29 @@ class MacAppLauncherView extends ItemView {
     stat("✅", "本期已收", `${s.doneCount} 张`, `卡册共 ${s.cards.length} 张`, false);
     stat("📈", "累计已领价值", `¥${s.claimedValue}`, `共打卡 ${s.total} 次`, false);
 
+    // 打卡进度：连续天数 + 收集等级（左），最近 14 天格子（右）
+    const progress = wrap.createDiv({ cls: "mal-checkin" });
+    const progressLeft = progress.createDiv({ cls: "mal-checkin-left" });
+    progressLeft.createDiv({ cls: "mal-checkin-label", text: "🔥 连续打卡" });
+    const streakWrap = progressLeft.createDiv({ cls: "mal-checkin-streak" });
+    streakWrap.createSpan({ text: String(s.streak) });
+    streakWrap.createSpan({ cls: "mal-checkin-unit", text: " 天" });
+    progressLeft.createDiv({ cls: "mal-checkin-level", text: `${s.level.icon} 收集等级 · ${s.level.name}` });
+    const progressRight = progress.createDiv({ cls: "mal-checkin-right" });
+    progressRight.createDiv({ cls: "mal-checkin-label", text: "最近 14 天" });
+    const days = progressRight.createDiv({ cls: "mal-checkin-days" });
+    for (const d of s.recent14) {
+      const cell = days.createDiv({ cls: `mal-checkin-day${d.checked ? " is-on" : ""}${d.isToday ? " is-today" : ""}` });
+      cell.setAttribute("title", `${d.key}${d.checked ? " · 已打卡" : " · 未打卡"}`);
+      cell.createSpan({ cls: "mal-checkin-day-num", text: String(d.day) });
+    }
+
     const head = wrap.createDiv({ cls: "mal-album-head" });
     head.createEl("h3", { text: "AI 算力卡册" });
     const tools = head.createDiv({ cls: "mal-album-tools" });
     tools.createSpan({ cls: "mal-album-count", text: `${s.cards.length} 张 · 有效 ${s.validCount} 张 · 已收 ${s.doneCount} 张` });
+    const guide = tools.createEl("button", { cls: "mal-album-pill", text: "❓ 使用教程" });
+    guide.addEventListener("click", () => new ComputeGuideModal(this.app).open());
     const add = tools.createEl("button", { cls: "mal-album-pill is-dark", text: "+ 添加卡片" });
     add.addEventListener("click", () => {
       new ComputeCardModal(this.app, this.plugin, null, () => this.render()).open();
@@ -2257,7 +2364,7 @@ class MacAppLauncherView extends ItemView {
     const el = grid.createDiv({ cls: `mal-shelf-card${claimed ? " is-claimed" : ""}${!available ? " is-expired" : ""}` });
 
     const top = el.createDiv({ cls: "mal-shelf-top" });
-    top.createSpan({ cls: "mal-shelf-value", text: card.value || "—" });
+    top.createSpan({ cls: "mal-shelf-value", text: card.desc || "—" });
     top.createSpan({ cls: `mal-shelf-dot${claimed ? " is-on" : " is-off"}` });
 
     const main = el.createDiv({ cls: "mal-shelf-main" });
@@ -2272,7 +2379,7 @@ class MacAppLauncherView extends ItemView {
     foot.createSpan({ cls: `mal-shelf-state${isDone ? " is-done" : ""}`, text: stateText });
 
     el.setAttribute("data-card-id", card.id);
-    el.setAttribute("title", `${card.name} · ${card.value || ""}${claimed ? " · 已收" : " · 待收"}`);
+    el.setAttribute("title", `${card.name} · ${card.desc || ""}${claimed ? " · 已收" : " · 待收"}`);
     el.addEventListener("click", () => this.openCardDetail(card, el));
     el.addEventListener("contextmenu", event => {
       event.preventDefault();
